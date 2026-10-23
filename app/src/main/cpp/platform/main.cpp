@@ -5601,6 +5601,19 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
                 break;
             }
         }
+        // 0.12-Y-E: a grade do dia/noite + o ângulo do sol — UMA VEZ por
+        // frame (a identidade quando não há ciclo: o w=0 do meio-dia
+        // devolve as cores do utilizador; a luz recebe o par de sempre)
+        sky::SkyGrade gradeNow{};
+        f32 sunDirNow[3] = {0.4545f, 0.7435f, 0.2891f};
+        bool skyCyc = false;
+        if (env != nullptr &&
+            env->skyType == Environment::kSkyTypeProcedural) {
+            skyCyc = true;
+            sky::dayNightGrade(env->timeOfDay, env->skyColorHorizon,
+                               env->skyColorZenith, env->sunColor, gradeNow);
+            sky::sunDirFromTime(env->timeOfDay, sunDirNow);
+        }
         if (env != nullptr) {
             glClearColor(env->skyColor[0], env->skyColor[1],
                          env->skyColor[2], 1.0f);
@@ -5610,8 +5623,9 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
             // nuvens com O TEMPO ACUMULADO g_skyTime — a ordem do dono:
             // «Passa o time acumulado do motor para o shader»). O 0 = o
             // clear de sempre (o quad NEM EXISTE no frame — byte a byte).
-            if (env->skyType == Environment::kSkyTypeProcedural &&
-                g_sky.ok()) {
+            // 0.12-Y-E — O CICLO DIA/NOITE: as cores chegam JÁ graduadas
+            // (a grade acima corre no CPU 1× por frame, nunca por pixel).
+            if (skyCyc && g_sky.ok()) {
                 SkyRenderer::Params sp;
                 sky::viewBasis(view, sp.right, sp.up, sp.fwd);
                 sp.aspect = sky::aspectFromProj(proj);
@@ -5619,11 +5633,13 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
                 sp.time = g_skyTime;
                 sp.coverage = env->cloudCoverage;
                 sp.speed = env->cloudSpeed;
+                sp.height = env->cloudHeight;
+                sp.stars = gradeNow.stars;
                 for (int i = 0; i < 3; ++i) {
-                    sp.horizon[i] = env->skyColorHorizon[i];
-                    sp.zenith[i] = env->skyColorZenith[i];
-                    sp.sunCol[i] = env->sunColor[i];
-                    sp.sunDir[i] = env->sunDirection[i];
+                    sp.horizon[i] = gradeNow.hor[i];
+                    sp.zenith[i] = gradeNow.zen[i];
+                    sp.sunCol[i] = gradeNow.sun[i];
+                    sp.sunDir[i] = sunDirNow[i];
                 }
                 g_sky.draw(sp);
             }
@@ -5636,6 +5652,17 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
             lit->use();
             lit->setFog(fogc, density, camEye);
             lit->setAmbientScale(amb);
+            // 0.12-Y-E — A DIRECTIONAL EM SINCRONIA COM O SOL: o lit recebe
+            // a direção/cor do sol do ciclo SÓ com céu procedural (o par da
+            // identidade de sempre no resto — o lit byte a byte); a cor sai
+            // da grade JÁ com a intensidade (o luar fraco, o alaranjado).
+            if (skyCyc) {
+                lit->setLight(sunDirNow, gradeNow.light);
+            } else {
+                constexpr f32 kLitDirId[3] = {0.4545f, 0.7435f, 0.2891f};
+                constexpr f32 kLitColId[3] = {1.0f, 1.0f, 1.0f};
+                lit->setLight(kLitDirId, kLitColId);
+            }
         }
     }
     const auto& mrs = comps.meshRenderers();
@@ -6787,6 +6814,24 @@ void frame() {
     // congela o céu — a mesma honra do sdf::g_time; 1× por frame, nunca por
     // passo fixo — o céu é render, não lógica)
     g_skyTime += g_frameDt;
+    // 0.12-Y-E: o AUTO CICLE — o relógio do DIA avança pelo dayCycleSpeed
+    // (1.0 = 1 hora de jogo por segundo real; o 1.º Environment ATIVO manda,
+    // o MESMO invariante do clear) — dá a volta em 24h (o clampFields
+    // modula; o render de baixo consome o valor fresco do MESMO frame)
+    {
+        auto& envsMut = g_scene.components().environments();
+        for (u32 i = 0; i < envsMut.size(); ++i) {
+            const Tic* t = g_scene.get(envsMut.owner(i));
+            if (t && t->active && envsMut.at(i).active) {
+                Environment* em = &envsMut.at(i);
+                if (em->autoCycle && em->dayCycleSpeed > 0.0f) {
+                    em->timeOfDay += em->dayCycleSpeed * g_frameDt;
+                    em->clampFields();
+                }
+                break;
+            }
+        }
+    }
     const DrawStats st3d = drawTics(vp, camEye, view, proj);
     // 0.10-M (PASSO 4) — o LOG das métricas reais (AQUI: editor E play — o
     // statusLine de baixo só vive em play; throttled 1×/s e só quando o nº

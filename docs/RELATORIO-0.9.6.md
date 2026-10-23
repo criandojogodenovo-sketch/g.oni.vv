@@ -725,3 +725,23 @@ projects_ui_check recalibrado (a mutação M-UIj vermelho→verde ao
 vivo) · docs-lint VERDE · **versionCode 120** — o build vigente. O 119
 fica INTACTO como história. (o relatório próprio:
 docs/RELATORIO-FASE-UI.md §13)
+
+### §14-k — 0.12-Y-E (o ciclo dia/noite) — versionCode 121
+
+**G8** (o par declarado no MESMO commit, a regra do §14): o CÉU
+PROCEDURAL ganha o CICLO DIA/NOITE — a grade dos 4 estados chave
+(noite/amanhecer/meio-dia/pôr do sol) corre NO CPU 1× por frame e o FS
+consome os uniforms JÁ graduados (ZERO ALU novo por pixel — a
+otimização do C33); as ESTRELAS atrás de um branch uniforme (o hash
+inteiro sem sin); o sol roda pelo relógio (06h leste, 12h zénite, 18h
+oeste) e a DIRECTIONAL sincroniza (o setLight do lit — o luar azul
+fraco à noite, o alaranjado ao pôr do sol); cloudHeight (0.25..4)
+escala o plano das nuvens; o autoCycle avança o relógio no frame() com
+o anel de 24h; o Inspector ganha hora/auto ciclo/vel./altura (ids
+5431..5434); o .goni transporta tod/cycSpd/cycOn/cloudH com defaults
+omitidos. verificação: pins env_sky_clouds · env_daynight_cycle ·
+env_serialize · inspector_daynight + R-061 (5) + M-Ye1/M-Ye2 VERMELHAS
+AO VIVO (a M-Ye2 herdada aplicada na árvore — a lição do objeto stale
+com testes a provar) → suíte 0 falhas · c33_virtual 1008/0 · docs-lint
+VERDE · **versionCode 121** — o build vigente. O 120 fica INTACTO como
+história. (o relatório próprio: docs/RELATORIO-0.12-Y-E-SKY.md)

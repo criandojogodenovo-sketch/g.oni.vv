@@ -40,6 +40,14 @@ public:
     static constexpr f32 kCoverageDefault = 0.4f;
     static constexpr f32 kSpeedDefault    = 0.02f;
     static constexpr f32 kSpeedMax        = 0.2f;   // o teto do slider (10×)
+    // 0.12-Y-E: o CICLO DIA/NOITE — o meio-dia (12) é a IDENTIDADE do céu
+    // (o byte a byte da D: o gradiente e a luz de sempre com tod 12)
+    static constexpr f32 kTodDefault      = 12.0f;  // 0..24 horas
+    static constexpr f32 kTodMax          = 24.0f;
+    static constexpr f32 kCycleMax        = 1.0f;   // 1.0 = 1 hora por segundo
+    static constexpr f32 kHeightDefault   = 1.0f;   // a escala vertical das
+    static constexpr f32 kHeightMin       = 0.25f;  // nuvens (o plano do FS)
+    static constexpr f32 kHeightMax       = 4.0f;
 
     f32 skyColor[4] = {0.040f, 0.045f, 0.065f, 1.0f};  // o céu (o clear)
     f32 fogColor[4] = {0.040f, 0.045f, 0.065f, 1.0f};  // a névoa
@@ -61,6 +69,14 @@ public:
                               kSunDirDefault[2]};    // normalizado
     f32 cloudCoverage      = kCoverageDefault;  // 0 = limpo, 1 = nublado
     f32 cloudSpeed         = kSpeedDefault;     // o vento (UV/s)
+
+    // ---- 0.12-Y-E: O CICLO DIA/NOITE (o shader calcula o ÂNGULO do sol
+    // pelo timeOfDay; o meio-dia 12 é a identidade da D) -------------------
+    f32 timeOfDay      = kTodDefault;  // 0..24 (a dar a volta, 24h)
+    f32 dayCycleSpeed  = 0.0f;         // 0..1 — 1.0 = 1 hora de jogo / s
+    bool autoCycle     = false;        // o Auto Cycle avança o relógio
+    f32 cloudHeight    = kHeightDefault;  // a escala vertical do plano das
+                                       // nuvens (1 = o céu da D byte a byte)
 
     // a clamp dos campos (o padrão AudioPlayer::clampFields)
     void clampFields() {
@@ -90,6 +106,16 @@ public:
         if (cloudCoverage > 1.0f) cloudCoverage = 1.0f;
         if (cloudSpeed < 0.0f) cloudSpeed = 0.0f;
         if (cloudSpeed > kSpeedMax) cloudSpeed = kSpeedMax;
+        // 0.12-Y-E: o relógio DÁ A VOLTA (24h — 25.3h é 1.3h; o negativo
+        // modula), o ciclo nunca é negativo e a altura vive no intervalo
+        timeOfDay = std::fmod(timeOfDay, kTodMax);
+        if (timeOfDay < 0.0f) {
+            timeOfDay += kTodMax;
+        }
+        if (dayCycleSpeed < 0.0f) dayCycleSpeed = 0.0f;
+        if (dayCycleSpeed > kCycleMax) dayCycleSpeed = kCycleMax;
+        if (cloudHeight < kHeightMin) cloudHeight = kHeightMin;
+        if (cloudHeight > kHeightMax) cloudHeight = kHeightMax;
         // a direção do sol NORMALIZA (o FS só consome direção; a norma
         // própria é o contrato — o zero cai no default da tarde)
         const f32 len = std::sqrt(sunDirection[0] * sunDirection[0] +

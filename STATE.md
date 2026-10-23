@@ -1,8 +1,7 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-23 · vc: 120 · Último commit: este (a FASE UI J — a
-tela de projetos: o ícone da engine no fallback do card e o Importar
-SECUNDÁRIO neutro; o §13 do RELATORIO-FASE-UI);
+Atualizado: 2026-10-23 · vc: 121 · Último commit: este (a 0.12-Y-E — o
+CICLO DIA/NOITE; o RELATORIO-0.12-Y-E-SKY.md);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -35,31 +34,32 @@ SECUNDÁRIO neutro; o §13 do RELATORIO-FASE-UI);
   vazio com o «+ criar TIC»; ui_inspector_cabecalho + M-UIe.
   **F (vc 116)**: A BARRA FINA + O PAINEL ENCAIXADO — o «Painéis ▾»
   (contorno brasa aberto) + o estado «60 FPS · 6 TICs» (o bl saiu), as 4
-  TABS na FILA 40dp (o viewport SOBE), a ÚLTIMA aba lembrada, alturas
-  ~30%/~40% (hCustom manda), a Animação com a timeline cabendo (clipada)
-  e o PONTO VERMELHO do erro; ui_paineis_dock + M-UIf; c33 13.7/20.5/31.
+  TABS na FILA 40dp (o viewport SOBE), a ÚLTIMA aba lembrada, a
+  Animação com a timeline cabendo (clipada) e o PONTO VERMELHO do
+  erro; ui_paineis_dock + M-UIf; c33 13.7/20.5/31.
   **G (vc 117)**: AS FOLHAS CONTIDAS — o teto de 85% (kSheetMaxPct), a
   reserva da barra no navegador, o X de fechar no menu (7411);
-  ui_sheets_conteudos + M-UIg (a lição do HEADER stale: touch no TU).
+  ui_sheets_conteudos + M-UIg.
   **H (vc 118)**: O EDITOR DE CÓDIGO — o TIC + os exportáveis, as ABAS
-  (em brasa; teto 6), o undo/redo por evento, a barra enxuta, a BRASA
-  SÓ nas reservadas, o MONO do 2.º atlas e a banda da linha corrente;
-  AS CAUSAS no §11 do relatório (o cap 256→512; o follow
-  só-no-evento); ui_codigo_editor + M-UIh; jniClipboardPaste.
+  (em brasa; teto 6), o undo/redo por evento, a BRASA SÓ nas
+  reservadas, o MONO do 2.º atlas e a banda da linha corrente; AS
+  CAUSAS no §11 (o cap 256→512; o follow só-no-evento); M-UIh.
   **I (vc 119)**: AS ABAS ÁUDIO E UI — o ÁUDIO com o ORÇAMENTO VERTICAL
-  (o rótulo CLIPS FIXO fora do scroll, a waveform FIXA 80dp, as ações
-  numa linha, o modal de apagar com 40dp); o UI com o vazio LEGÍVEL
-  (o drawEmptyState da casa) + o «+» claro (o plusMenu do C-4);
-  ui_audio_ui + M-UIi.
-  **J (vc 120)**: A TELA DE PROJETOS — o fallback do card é O ÍCONE DA
-  ENGINE (o BrandThumbView pela ÚNICA função; as letras morreram) e o
-  Importar SECUNDÁRIO neutro (a brasa SÓ no «Novo projeto»);
-  projects_ui_check recalibrado + M-UIj.
+  (o rótulo CLIPS FIXO fora do scroll, a waveform FIXA 80dp, o modal de
+  apagar 40dp); o UI com o vazio LEGÍVEL + o «+» claro; M-UIi.
+  **J (vc 120)**: A TELA DE PROJETOS — O ÍCONE DA ENGINE no fallback do
+  card (as letras morreram) e o Importar SECUNDÁRIO neutro (a brasa só
+  no «Novo projeto»); M-UIj.
 
-- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A, B, C, o
-  C-FIX e o D fechadas, vc 110; o FECHO a seguir)** (a cláusula calma: SÓ o
-  prompt; a V.ONI intocada; a história vive no RELATORIO-0.12-Y-ABERTURA.md
-  + o RELATORIO-0.12-Y.md).
+- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A..D, o
+  C-FIX e a E fechadas, vc 121; a F a seguir)** (a cláusula calma: SÓ
+  o prompt; a V.ONI intocada; a história no RELATORIO-0.12-Y-*.md).
+  **E (vc 121)**: o CICLO DIA/NOITE (no RELATORIO-0.12-Y-E-SKY.md) — a
+  grade dos 4 estados NO CPU 1×/frame (o FS consome os uniforms JÁ
+  graduados; ESTRELAS num branch uniforme); o sol roda pelo relógio e a
+  DIRECTIONAL sincroniza (setLight); cloudHeight escala o plano;
+  autoCycle avança o relógio (anel 24h); Inspector +4; .goni: tod/
+  cycSpd/cycOn/cloudH; pins ×4 + R-061(5) + M-Ye1/M-Ye2 AO VIVO.
   **D (vc 110)**: o CÉU PROCEDURAL (no RELATORIO-0.12-Y-SKY.md) — o shader do céu (render/SkyRenderer.{h,cpp} NOVOS, o padrão Pbr.h: o quad fullscreen + o gradiente horizonte→zénite + o sol disco/halo + as nuvens FBM 2D com hash inteiro e O TEMPO no UV; a base da câmara extraída da vista, válida na orbit E no Play), o Environment ganha skyType/cores do céu/sol/direção/cobertura/vento (o clampFields normaliza o sol), o .goni transporta com defaults omitidos, o Inspector ganha o dropdown "céu: cor sólida|procedural" + os 5 campos SÓ no procedural (ids 5425..5430, os hex 13/14/15, os sliders nuvens/vento), o main desenha o quad ANTES dos modelos com skyType==1 (o 0 = o clear de sempre byte a byte) e o relógio g_skyTime avança 1× por frame; pins ×2 (env_sky_type · inspector_sky) + R-061 regress_procedural_sky + M-Yd1/2 vermelho→reposto→verde (o achado: o falso verde POR COMENTÁRIO nasceu o test::stripCppComments); test_core 1208 OK (os flakes da sandbox excluídos — o CI é o árbitro).
   **C-FIX (vc 109)**: o TESTE DO DONO (Inspector do WorldEnvironment
   VAZIO + modelo BRANCO) — a secção Environment NO Inspector (céu hex ·

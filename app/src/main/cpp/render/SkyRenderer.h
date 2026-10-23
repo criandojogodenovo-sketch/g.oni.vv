@@ -142,6 +142,180 @@ inline f32 horizonFade(f32 dirY) {
     return sstep(kPlaneEps, kHorizonFadeY, dirY);
 }
 
+// ---- 0.12-Y-E: O CICLO DIA/NOITE + AS ESTRELAS + A ALTURA DAS NUVENS ----
+// A otimização mobile (o relatório 0.12-Y-E-SKY): a PALETA do dia/noite e o
+// ÂNGULO do sol correm UMA VEZ POR FRAME no CPU (main.cpp consome as puras
+// abaixo e manda as cores JÁ graduadas pelos uniforms que o céu JÁ TEM) —
+// o FS não paga NENHUMA cadeia nova por pixel além do campo de estrelas,
+// que fica ATRÁS de um branch uniforme (uStars — o dia salta-o inteiro).
+
+constexpr f32 kStarDensity = 60.0f;   // as células do campo na cúpula
+constexpr f32 kStarRadius  = 0.22f;   // o raio do ponto (em células)
+constexpr f32 kStarThresh  = 184.0f;  // o hash <isto = célula VAZIA (~72%)
+constexpr f32 kStarHorizonY = 0.08f;  // as estrelas morrem no horizonte
+constexpr f32 kSunHourRad  = 3.14159265f / 12.0f;  // 1h = 15° de arco
+
+// o hash 3D (a família do hashCellSky — SEM sin, determinístico em CPU e
+// em GLSL; o domínio é Z³ inteiro)
+inline u32 hash3u(i32 x, i32 y, i32 z) {
+    u32 h = static_cast<u32>(x) * 374761393u +
+            static_cast<u32>(y) * 668265263u +
+            static_cast<u32>(z) * 2246822519u;
+    h = (h ^ (h >> 13u)) * 1274126177u;
+    h ^= h >> 16u;
+    return h;
+}
+
+// o campo de ESTRELAS [0,1]: pontos brancos estocásticos — a célula 3D da
+// direção tem uma estrela só acima do THRESHOLD do hash (o céu não vira
+// poeira); o ponto vive num offset 0.2..0.8 da célula (nunca corta)
+inline f32 starField(f32 dx, f32 dy, f32 dz) {
+    const f32 sx = dx * kStarDensity;
+    const f32 sy = dy * kStarDensity;
+    const f32 sz = dz * kStarDensity;
+    const i32 cx = static_cast<i32>(std::floor(sx));
+    const i32 cy = static_cast<i32>(std::floor(sy));
+    const i32 cz = static_cast<i32>(std::floor(sz));
+    const u32 h = hash3u(cx, cy, cz);
+    if (static_cast<f32>(h & 0xFFu) < kStarThresh) {
+        return 0.0f;
+    }
+    const f32 ox = 0.2f + 0.6f * static_cast<f32>((h >> 8u) & 0xFFu) / 255.0f;
+    const f32 oy = 0.2f + 0.6f * static_cast<f32>((h >> 16u) & 0xFFu) / 255.0f;
+    const f32 oz = 0.2f + 0.6f * static_cast<f32>((h >> 24u) & 0xFFu) / 255.0f;
+    const f32 ax = sx - static_cast<f32>(cx) - ox;
+    const f32 ay = sy - static_cast<f32>(cy) - oy;
+    const f32 az = sz - static_cast<f32>(cz) - oz;
+    const f32 d = std::sqrt(ax * ax + ay * ay + az * az);
+    return 1.0f - sstep(0.0f, kStarRadius, d);
+}
+
+// o ÂNGULO do sol pelo relógio: 06h nasce a LESTE (+x, no horizonte), 12h
+// no ZÉNITE, 18h se põe a OESTE (−x), 00h sob o mundo (a noite). O eixo z
+// leva o tilte fixo da tarde da D (o arco inclina — não é um círculo seco).
+inline void sunDirFromTime(f32 tod, f32 out[3]) {
+    const f32 th = (tod - 6.0f) * kSunHourRad;
+    out[0] = std::cos(th);
+    out[1] = std::sin(th);
+    out[2] = -0.25f;
+    const f32 len = std::sqrt(out[0] * out[0] + out[1] * out[1] +
+                              out[2] * out[2]);
+    if (len > 1e-6f) {
+        out[0] /= len;
+        out[1] /= len;
+        out[2] /= len;
+    }
+}
+
+// a GRADE do dia/noite — os 4 estados chave (a ordem do dono) interpolados
+// por sstep nos segmentos [00,06,12,18,24] (a noite fecha o anel):
+//   00:00 noite — azul-marinho escuro, estrelas, LUAR fraco (a luz azulada)
+//   06:00 amanhecer — laranja/rosa no horizonte
+//   12:00 meio-dia — a IDENTIDADE (os cores do utilizador byte a byte)
+//   18:00 pôr do sol — vermelho/laranja intenso
+// O horizonte/zénite/sol saem MISTURADOS com os do utilizador (o w do
+// segmento manda: 0 no meio-dia = o céu da D; 1 na noite = a paleta-chave).
+struct SkyGrade {
+    f32 hor[3];    // o horizonte graduado (o uHorizon de sempre)
+    f32 zen[3];    // o zénite graduado (o uZenith de sempre)
+    f32 sun[3];    // a cor do sol graduada (disco/halo)
+    f32 light[3];  // a cor da DIRECTIONAL (o lit consome — o luar à noite)
+    f32 stars;     // o gate das estrelas (a luminância do céu manda)
+};
+
+inline void gradeLerp(const f32 a[3], const f32 b[3], f32 t, f32 out[3]) {
+    out[0] = a[0] + (b[0] - a[0]) * t;
+    out[1] = a[1] + (b[1] - a[1]) * t;
+    out[2] = a[2] + (b[2] - a[2]) * t;
+}
+
+// as paletas-chave (constantes da fonte — o FS NÃO as replica: elas chegam
+// pelos uniforms que o céu já tem, a otimização é não pagá-las por pixel)
+constexpr f32 kNightHor[3] = {0.020f, 0.030f, 0.075f};
+constexpr f32 kNightZen[3] = {0.008f, 0.014f, 0.055f};
+constexpr f32 kNightSun[3] = {0.060f, 0.080f, 0.150f};
+constexpr f32 kNightLight[3] = {0.16f, 0.22f, 0.36f};  // o LUAR fraco
+constexpr f32 kDawnHor[3]  = {0.98f, 0.55f, 0.38f};
+constexpr f32 kDawnZen[3]  = {0.35f, 0.38f, 0.60f};
+constexpr f32 kDawnSun[3]  = {1.00f, 0.72f, 0.45f};
+constexpr f32 kDawnLight[3] = {0.85f, 0.62f, 0.45f};
+constexpr f32 kDuskHor[3]  = {0.95f, 0.38f, 0.20f};
+constexpr f32 kDuskZen[3]  = {0.25f, 0.20f, 0.45f};
+constexpr f32 kDuskSun[3]  = {1.00f, 0.48f, 0.26f};
+constexpr f32 kDuskLight[3] = {0.80f, 0.52f, 0.38f};
+constexpr f32 kDawnStars = 0.10f;
+constexpr f32 kDuskStars = 0.15f;
+constexpr f32 kNightStars = 1.0f;
+
+inline void dayNightGrade(f32 tod, const f32 userHor[3], const f32 userZen[3],
+                          const f32 userSun[3], SkyGrade& g) {
+    // o relógio entra SEMPRE em [0,24] (o clampFields do Environment)
+    if (tod < 0.0f) tod = 0.0f;
+    if (tod > 24.0f) tod = 24.0f;
+    // A FONTE ÚNICA: os 4 estados chave com O MEIO-DIA SENDO AS CORES DO
+    // UTILIZADOR (a identidade da D — 12h devolve byte a byte) e a ÚNICA
+    // interpolação por segmento (sstep — suave, a ordem do dono):
+    //   [00..04[ noite (o plateau do luar)  → [04..06] pre-amanhecer
+    //   [06..12] amanhecer → meio-dia       → [12..18] meio-dia → pôr do sol
+    //   [18..21] crepúsculo (a noite cai em 3h) → [21..24] noite (plateau)
+    f32 u;
+    const f32* hor0; const f32* zen0; const f32* sun0; const f32* lig0;
+    f32 stars0; f32 stars1;
+    const f32* hor1; const f32* zen1; const f32* sun1; const f32* lig1;
+    if (tod < 6.0f) {          // noite → amanhecer (o plateau até às 4)
+        u = sstep(4.0f, 6.0f, tod);
+        hor0 = kNightHor; zen0 = kNightZen; sun0 = kNightSun;
+        lig0 = kNightLight; stars0 = kNightStars;
+        hor1 = kDawnHor; zen1 = kDawnZen; sun1 = kDawnSun;
+        lig1 = kDawnLight; stars1 = kDawnStars;
+    } else if (tod < 12.0f) {  // amanhecer → meio-dia (as cores do dono)
+        u = sstep(6.0f, 12.0f, tod);
+        hor0 = kDawnHor; zen0 = kDawnZen; sun0 = kDawnSun;
+        lig0 = kDawnLight; stars0 = kDawnStars;
+        hor1 = userHor; zen1 = userZen; sun1 = userSun;
+        lig1 = userSun; stars1 = 0.0f;
+    } else if (tod < 18.0f) {  // meio-dia (o dono) → pôr do sol
+        u = sstep(12.0f, 18.0f, tod);
+        hor0 = userHor; zen0 = userZen; sun0 = userSun;
+        lig0 = userSun; stars0 = 0.0f;
+        hor1 = kDuskHor; zen1 = kDuskZen; sun1 = kDuskSun;
+        lig1 = kDuskLight; stars1 = kDuskStars;
+    } else {                   // pôr do sol → noite (o crepúsculo em 3h)
+        u = sstep(18.0f, 21.0f, tod);
+        hor0 = kDuskHor; zen0 = kDuskZen; sun0 = kDuskSun;
+        lig0 = kDuskLight; stars0 = kDuskStars;
+        hor1 = kNightHor; zen1 = kNightZen; sun1 = kNightSun;
+        lig1 = kNightLight; stars1 = kNightStars;
+    }
+    // o MIX ÚNICO (as cores do utilizador já são o estado do meio-dia —
+    // nenhuma segunda mistura dilui a noite)
+    gradeLerp(hor0, hor1, u, g.hor);
+    gradeLerp(zen0, zen1, u, g.zen);
+    gradeLerp(sun0, sun1, u, g.sun);
+    gradeLerp(lig0, lig1, u, g.light);
+    g.stars = stars0 + (stars1 - stars0) * u;
+    // o clamp honesto (as paletas-chave vivem em [0,1]; o mix nunca sai)
+    for (int i = 0; i < 3; ++i) {
+        if (g.hor[i] < 0.0f) g.hor[i] = 0.0f;
+        if (g.hor[i] > 1.0f) g.hor[i] = 1.0f;
+        if (g.zen[i] < 0.0f) g.zen[i] = 0.0f;
+        if (g.zen[i] > 1.0f) g.zen[i] = 1.0f;
+        if (g.sun[i] < 0.0f) g.sun[i] = 0.0f;
+        if (g.sun[i] > 1.0f) g.sun[i] = 1.0f;
+        if (g.light[i] < 0.0f) g.light[i] = 0.0f;
+        if (g.light[i] > 1.0f) g.light[i] = 1.0f;
+    }
+}
+
+// o UV das NUVENS com a ALTURA (a réplica do FS linha a linha): o plano
+// da projeção sobe/desce — 1 = o céu da D byte a byte
+inline void cloudUv(f32 dx, f32 dy, f32 dz, f32 height, f32 time, f32 speed,
+                    f32 out[2]) {
+    const f32 inv = 1.0f / (dy > kPlaneEps ? dy : kPlaneEps);
+    out[0] = dx * inv * kCloudScale * height + time * speed * kWindDirX;
+    out[1] = dz * inv * kCloudScale * height + time * speed * kWindDirY;
+}
+
 // ---- a BASE da câmara a partir da VISTA (a extração pura) ------------------
 // O lookAt da casa (math/Math.h) guarda as LINHAS right/up/−fwd na rotação
 // column-major: right=(m0,m4,m8) · up=(m1,m5,m9) · fwd=−(m2,m6,m10). Vale
@@ -197,6 +371,8 @@ public:
         f32  sunDir[3]  = {0.5571f, 0.7428f, -0.3714f};  // a tarde
         f32  coverage = 0.4f;         // 0 = limpo, 1 = nublado
         f32  speed = 0.02f;           // o vento (UV/s)
+        f32  height = 1.0f;           // 0.12-Y-E: a escala vertical das nuvens
+        f32  stars = 0.0f;            // 0.12-Y-E: o gate das estrelas (0..1)
     };
 
     bool init();      // compila/linka o programa + o quad (o padrão Grid)
@@ -226,6 +402,8 @@ private:
     i32 locTime_ = -1;     // uTime — a M-Yd1 vive AQUI (o último 1f do draw)
     i32 locSpeed_ = -1;
     i32 locCoverage_ = -1;
+    i32 locHeight_ = -1;   // 0.12-Y-E: a escala vertical das nuvens
+    i32 locStars_ = -1;    // 0.12-Y-E: o gate das estrelas
     i32 locHor_ = -1;
     i32 locZen_ = -1;
     i32 locSunCol_ = -1;

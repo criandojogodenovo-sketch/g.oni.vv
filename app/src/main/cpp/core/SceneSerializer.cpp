@@ -1289,6 +1289,20 @@ void appendComponentJson(Json& arr, const Environment* env) {
     if (env->cloudSpeed != Environment::kSpeedDefault) {
         c.addMember("cloudSpd", Json::makeNumber(env->cloudSpeed));
     }
+    // ---- 0.12-Y-E: O CICLO DIA/NOITE (defaults omitidos = o meio-dia da
+    // identidade — o .goni da D carrega byte a byte) -----------------------
+    if (env->timeOfDay != Environment::kTodDefault) {
+        c.addMember("tod", Json::makeNumber(env->timeOfDay));
+    }
+    if (env->dayCycleSpeed != 0.0f) {
+        c.addMember("cycSpd", Json::makeNumber(env->dayCycleSpeed));
+    }
+    if (env->autoCycle) {
+        c.addMember("cycOn", Json::makeNumber(1));
+    }
+    if (env->cloudHeight != Environment::kHeightDefault) {
+        c.addMember("cloudH", Json::makeNumber(env->cloudHeight));
+    }
     arr.addItem(std::move(c));
 }
 
@@ -1357,6 +1371,23 @@ void fillEnvironment(Environment* env, const Json& comp) {
     if (const Json* j = comp.find("cloudSpd");
         j && j->type == Json::Type::Number) {
         env->cloudSpeed = static_cast<f32>(j->number);
+    }
+    // ---- 0.12-Y-E: O CICLO DIA/NOITE (os campos ausentes = o meio-dia) ---
+    if (const Json* j = comp.find("tod");
+        j && j->type == Json::Type::Number) {
+        env->timeOfDay = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("cycSpd");
+        j && j->type == Json::Type::Number) {
+        env->dayCycleSpeed = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("cycOn");
+        j && j->type == Json::Type::Number) {
+        env->autoCycle = j->number != 0.0;
+    }
+    if (const Json* j = comp.find("cloudH");
+        j && j->type == Json::Type::Number) {
+        env->cloudHeight = static_cast<f32>(j->number);
     }
     env->clampFields();
 }

@@ -1640,6 +1640,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     char envHorHex[12] = "";
     char envZenHex[12] = "";
     char envSunHex[12] = "";
+    char envCycLabel[32] = "";   // 0.12-Y-E: o estado do auto ciclo
     if (envEdit) {
         if (!envEdit->hdriPath.empty()) {
             std::snprintf(envHdriLabel, sizeof(envHdriLabel), "hdri: %s",
@@ -1657,6 +1658,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         uiHexFormat(envEdit->skyColorHorizon, envHorHex, sizeof(envHorHex));
         uiHexFormat(envEdit->skyColorZenith, envZenHex, sizeof(envZenHex));
         uiHexFormat(envEdit->sunColor, envSunHex, sizeof(envSunHex));
+        // 0.12-Y-E: o rótulo do AUTO CICLE (o MESMO padrão da cam ativa)
+        std::snprintf(envCycLabel, sizeof(envCycLabel), "auto ciclo: %s",
+                      envEdit->autoCycle ? "ligado" : "desligado");
     }
     char camProjLabel[48] = "";   // 0.7.7
     char camActiveLabel[48] = "";
@@ -2746,6 +2750,52 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 }
             }
             break;
+        case InspRow::Kind::EnvTod:
+            // 0.12-Y-E — slider HORA 0..24 (o relógio do dia; o meio-dia
+            // 12 é a identidade da D, a noite 0/24 escurece e faz estrelas)
+            if (envEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "hora", 0.0f,
+                              Environment::kTodMax, envEdit->timeOfDay,
+                              "%.1fh")) {
+                    envEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::EnvCyc:
+            // 0.12-Y-E — o botão AUTO CICLE (o toggle da casa — o padrão
+            // CamActive; o avanço contínuo vive no relógio do main)
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      envCycLabel);
+            break;
+        case InspRow::Kind::EnvCycS:
+            // 0.12-Y-E — slider VEL. CICLO 0..1 (1.0 = 1 hora de jogo por
+            // segundo — o dia completo dura 24 s de relógio real)
+            if (envEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "vel. ciclo", 0.0f,
+                              Environment::kCycleMax, envEdit->dayCycleSpeed,
+                              "%.2f")) {
+                    envEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::EnvHgt:
+            // 0.12-Y-E — slider ALTURA NUVENS 0.25..4 (a escala vertical do
+            // plano das nuvens; 1 = o céu da D byte a byte)
+            if (envEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "altura nuvens",
+                              Environment::kHeightMin, Environment::kHeightMax,
+                              envEdit->cloudHeight, "%.2f")) {
+                    envEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
         case InspRow::Kind::EnvSky: {
             // "céu: #RRGGBB" + swatch VIVO (o MESMO padrão da linha hex do
             // tint: tocar abre o teclado em modo hex — propósito 11)
@@ -2885,6 +2935,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind != InspRow::Kind::EnvHor &&      // 3.Y-D: hex horizonte
                 r.kind != InspRow::Kind::EnvZen &&      // 3.Y-D: hex zénite
                 r.kind != InspRow::Kind::EnvSunC &&     // 3.Y-D: hex sol
+                r.kind != InspRow::Kind::EnvCyc &&      // 0.12-Y-E: auto ciclo
                 !isSection &&                           // 0.9.0: colapsar
                 r.kind != InspRow::Kind::TransformRow &&// 0.9.0: caixas X/Y/Z + R
                 r.kind != InspRow::Kind::Slider) {      // 0.8.9: zona do VALOR
@@ -3088,6 +3139,13 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                     char cur[12];
                     uiHexFormat(e->sunColor, cur, sizeof(cur));
                     openTextInput(st, 15, st.selected, -1, cur);
+                }
+            } else if (r.kind == InspRow::Kind::EnvCyc) {
+                // 0.12-Y-E — o TOGGLE do auto ciclo (o avanço contínuo do
+                // relógio vive no main — o Inspector só muda o estado)
+                if (Environment* e = tic->getComponent<Environment>()) {
+                    e->autoCycle = !e->autoCycle;
+                    edited = true;
                 }
             } else if (r.kind == InspRow::Kind::EnvHdri) {
                 // 0.12-Y-fix — o NAVEGADOR com a intenção HDRI (o flag é o

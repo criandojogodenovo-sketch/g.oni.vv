@@ -8565,4 +8565,85 @@ TEST(regress_procedural_sky) {
         EXPECT_MSG(code.find("uniform float uTime;") != std::string::npos,
                    "R-061: o FS perdeu o uniform uTime");
     }
+    // (5) 0.12-Y-E — O CICLO DIA/NOITE NÃO MORRE: a identidade do meio-dia
+    // (o byte a byte da D), a noite ESCURA com estrelas (o teste do dono:
+    // 20h), o sol roda pelo relógio, a ALTURA escala o plano das nuvens e
+    // o roundtrip dos 4 campos novos (tod/cycSpd/cycOn/cloudH). A M-Ye2
+    // (a grade morta) e a M-Ye1 (o tempo fora do UV) morrem AQUI.
+    {
+        const f32 hor[3] = {0.29f, 0.56f, 0.89f};
+        const f32 zen[3] = {0.12f, 0.23f, 0.54f};
+        const f32 sun[3] = {1.0f, 0.87f, 0.67f};
+        sky::SkyGrade g;
+        sky::dayNightGrade(12.0f, hor, zen, sun, g);
+        EXPECT_MSG(g.hor[0] == hor[0] && g.zen[1] == zen[1] &&
+                       g.stars == 0.0f,
+                   "R-061: o meio-dia deixou de ser a IDENTIDADE (a grade "
+                   "pisou as cores do utilizador — M-Ye2)");
+        sky::dayNightGrade(20.0f, hor, zen, sun, g);
+        const f32 lum = 0.2126f * g.hor[0] + 0.7152f * g.hor[1] +
+                        0.0722f * g.hor[2];
+        EXPECT_MSG(lum < 0.16f && g.stars > 0.5f,
+                   "R-061: às 20h o céu não escurece com estrelas "
+                   "(lum=%.3f stars=%.2f — M-Ye2 vermelho)",
+                   (double)lum, (double)g.stars);
+        f32 d6[3], d18[3];
+        sky::sunDirFromTime(6.0f, d6);
+        sky::sunDirFromTime(18.0f, d18);
+        EXPECT_MSG(d6[0] > 0.85f && d18[0] < -0.85f,
+                   "R-061: o sol deixou de rodar pelo relógio (nasce %.2f "
+                   "põe-se %.2f)", (double)d6[0], (double)d18[0]);
+        f32 uv1[2], uv2[2];
+        sky::cloudUv(0.3f, 0.8f, -0.5f, 1.0f, 0.0f, 0.0f, uv1);
+        sky::cloudUv(0.3f, 0.8f, -0.5f, 2.0f, 0.0f, 0.0f, uv2);
+        EXPECT_MSG(uv2[0] > uv1[0] * 1.9f && uv2[0] < uv1[0] * 2.1f,
+                   "R-061: a ALTURA das nuvens deixou de escalar o plano");
+        // o roundtrip dos campos novos (o serializer não pode perder NENHUM)
+        Scene a;
+        const Handle h = a.create("Ciclo");
+        a.get(h)->addComponent<Transform3D>();
+        Environment* e = a.get(h)->addComponent<Environment>();
+        e->timeOfDay = 21.0f;
+        e->dayCycleSpeed = 0.5f;
+        e->autoCycle = true;
+        e->cloudHeight = 3.0f;
+        e->clampFields();
+        const std::string dump = SceneSerializer::dump(a);
+        EXPECT_MSG(dump.find("\"tod\"") != std::string::npos &&
+                       dump.find("\"cycSpd\"") != std::string::npos &&
+                       dump.find("\"cycOn\"") != std::string::npos &&
+                       dump.find("\"cloudH\"") != std::string::npos,
+                   "R-061: o .goni PERDEU o ciclo dia/noite (tod/cycSpd/"
+                   "cycOn/cloudH)");
+        Scene b;
+        SceneSerializer::LoadCtx ctx;
+        ASSERT(SceneSerializer::loadText(b, dump, ctx));
+        const Environment* e2 =
+            b.get(b.find("Ciclo"))->getComponent<Environment>();
+        ASSERT(e2 != nullptr);
+        EXPECT_MSG(nearEqF(e2->timeOfDay, 21.0f, 1e-5f) &&
+                       nearEqF(e2->dayCycleSpeed, 0.5f, 1e-5f) &&
+                       e2->autoCycle && nearEqF(e2->cloudHeight, 3.0f, 1e-5f),
+                   "R-061: o ciclo dia/noite não volta do .goni");
+        // os DEFAULTS fora do dump (o meio-dia é silêncio — forward-compat)
+        Scene c;
+        const Handle hc = c.create("limpo");
+        c.get(hc)->addComponent<Transform3D>();
+        c.get(hc)->addComponent<Environment>();
+        const std::string dump2 = SceneSerializer::dump(c);
+        EXPECT_MSG(dump2.find("\"tod\"") == std::string::npos &&
+                       dump2.find("\"cycOn\"") == std::string::npos,
+                   "R-061: os defaults do ciclo INVADIRAM o .goni");
+        // o contrato do FS da E: a altura + o branch das estrelas no fonte
+        std::string src;
+        EXPECT(readFileText(REPO_ROOT
+                            "/app/src/main/cpp/render/SkyRenderer.cpp",
+                            src));
+        const std::string code = test::stripCppComments(src);
+        EXPECT_MSG(code.find("(kCloudScale * uHeight)") != std::string::npos,
+                   "R-061: a ALTURA saiu do UV das nuvens no FS");
+        EXPECT_MSG(code.find("if (uStars > 0.001)") != std::string::npos,
+                   "R-061: o branch UNIFORME das estrelas morreu (o dia "
+                   "paga o campo inteiro)");
+    }
 }

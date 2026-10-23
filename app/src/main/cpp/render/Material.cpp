@@ -107,7 +107,11 @@ uniform vec3 uFogColor;
 uniform float uFogDensity;
 uniform float uAmbientScale;   // o WorldEnvironment (o HDRI ilumina)
 uniform vec3 uEye;
-const vec3 kLightDir = vec3(0.4545, 0.7435, 0.2891);  // já normalizada, PARA a luz
+// 0.12-Y-E: a DIRECTIONAL do céu (o sol do ciclo dia/noite). O main manda
+// SEMPRE: a identidade de sempre sem céu procedural (o kLightDir + branco
+// = o lit byte a byte), o sol graduado com o ciclo ligado.
+uniform vec3 uLightDir;   // PARA a luz (a direção do sol — sunDirFromTime)
+uniform vec3 uLightCol;   // a cor JÁ com a intensidade (o luar à noite)
 const vec3 kAmbient  = vec3(0.16);
 const vec3 kAlbedo   = vec3(0.58);
 void main() {
@@ -131,7 +135,7 @@ void main() {
         rough = rm.x;
         metal = rm.y;
     }
-    float diff = max(dot(n, kLightDir), 0.0);
+    float diff = max(dot(n, uLightDir), 0.0);
     vec4 texel = vec4(1.0);
     if (uHasTex > 0.5) {
         texel = texture(uBaseColorTex, vUV);
@@ -144,10 +148,10 @@ void main() {
     // 0.12-Y: o PBR-lite (as fórmulas da fonte única render/Pbr.h)
     float shin = 4.0 + (1.0 - clamp(rough, 0.0, 1.0)) * (1.0 - clamp(rough, 0.0, 1.0)) * 252.0;
     vec3 vdir = normalize(uEye - vWorldPos);
-    vec3 h = normalize(kLightDir + vdir);
+    vec3 h = normalize(uLightDir + vdir);
     float spec = pow(max(dot(n, h), 0.0), shin);
     float mdiff = 1.0 - clamp(metal, 0.0, 1.0) * 0.85;
-    vec3 c = kAmbient * uAmbientScale + alb * mdiff * diff + spec * mix(vec3(0.04), alb, metal) + uEmissive;
+    vec3 c = kAmbient * uAmbientScale + uLightCol * (alb * mdiff * diff + spec * mix(vec3(0.04), alb, metal)) + uEmissive;
     // a névoa exp2 (density 0 = morta — o byte a byte do lit de sempre)
     float fog = 1.0 - exp(-pow(length(uEye - vWorldPos) * uFogDensity, 2.0));
     c = mix(c, uFogColor, clamp(fog, 0.0, 1.0));
@@ -238,6 +242,10 @@ bool LitMaterial::init() {
     locFogDensity_ = glGetUniformLocation(prog_, "uFogDensity");
     locAmbientScale_ = glGetUniformLocation(prog_, "uAmbientScale");
     locEye_ = glGetUniformLocation(prog_, "uEye");
+    // 0.12-Y-E: a directional do céu (os locations — o -1 honesto quando o
+    // link não os tem)
+    locLightDir_ = glGetUniformLocation(prog_, "uLightDir");
+    locLightCol_ = glGetUniformLocation(prog_, "uLightCol");
     LOGI("LitMaterial: lit difusa fixa + ambient + uBaseColorTex (unit 0 — "
          "o albedo slot 0) + uTint "
          "+ skin (UBO Bones[128]) + instancing (UBO Instances[64]) + props "
@@ -260,6 +268,7 @@ void LitMaterial::destroy() {
     locRoughness_ = locMetallic_ = -1;           // 0.12-Y
     locFogColor_ = locFogDensity_ = locEye_ = -1;
     locAmbientScale_ = -1;
+    locLightDir_ = locLightCol_ = -1;   // 0.12-Y-E
 }
 
 void LitMaterial::use() const {
@@ -478,6 +487,17 @@ void LitMaterial::setFog(const f32 rgb[3], f32 density, const Vec3& eye) const {
 void LitMaterial::setAmbientScale(f32 scale) const {
     if (locAmbientScale_ >= 0) {
         glUniform1f(locAmbientScale_, scale);
+    }
+}
+
+// 0.12-Y-E: a DIRECTIONAL do céu (o sol do ciclo — a cor JÁ graduada com
+// a intensidade; o par identidade é o kLightDir de sempre + branco)
+void LitMaterial::setLight(const f32 dir[3], const f32 col[3]) const {
+    if (locLightDir_ >= 0 && dir) {
+        glUniform3f(locLightDir_, dir[0], dir[1], dir[2]);
+    }
+    if (locLightCol_ >= 0 && col) {
+        glUniform3f(locLightCol_, col[0], col[1], col[2]);
     }
 }
 

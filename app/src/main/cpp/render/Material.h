@@ -106,6 +106,11 @@ public:
     // o multiplicador do ambient (o HDRI do WorldEnvironment; o setFog
     // repõe 1.0 — o boost vive SÓ no frame com Environment ativo)
     void setAmbientScale(f32 scale) const;
+    // 0.12-Y-E — a DIRECTIONAL do CÉU (o sol do ciclo dia/noite): a direção
+    // PARA a luz + a cor JÁ com a intensidade (o luar azul fraco à noite,
+    // o alaranjado ao pôr do sol). O setFog repõe a IDENTIDADE (o kLightDir
+    // de sempre + cor branca = o lit byte a byte sem Environment procedural).
+    void setLight(const f32 dir[3], const f32 col[3]) const;
 
     // tem de casar com o SkeletonComp (limite do bloco UBO no shader)
     static constexpr u32 kMaxBones = 128;   // 0.11-S: 128 (era 64)
@@ -171,6 +176,8 @@ private:
     i32 locFogDensity_ = -1;      // uFogDensity (float)
     i32 locAmbientScale_ = -1;    // uAmbientScale (float — o HDRI)
     i32 locEye_ = -1;             // uEye (vec3)
+    i32 locLightDir_ = -1;        // 0.12-Y-E: uLightDir (vec3 — o sol)
+    i32 locLightCol_ = -1;        // 0.12-Y-E: uLightCol (vec3 — cor/intens.)
 };
 
 // F3: alias pedido pela spec — MeshRenderer guarda `Material*`. A F3 tem um

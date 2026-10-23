@@ -1317,3 +1317,482 @@ TEST(inspector_sky) {
                    "inspector_sky: o hex inválido ESTRAGOU o horizonte");
     }
 }
+
+// ---- PIN env_sky_clouds (0.12-Y-E) --------------------------------------------
+// A ordem do dono: «nuvens procedurais mobile-friendly (FBM no FS, ZERO
+// raymarching), cloudCoverage/cloudSpeed/cloudHeight no Environment, o UV
+// desliza com o uTime». A ALTURA nova (o plano da projeção) + as ESTRELAS
+// (o campo estocástico atrás do branch uniforme) + o componente + o
+// contrato no FS + o draw real (a ordem do uTime INTACTA — o pin da D).
+TEST(env_sky_clouds) {
+    // (1) O UV COM A ALTURA — a réplica de sky::cloudUv: a altura escala o
+    // plano (2× = 2× o uv base) e o TEMPO continua a empurrar (M-Ye1)
+    {
+        f32 uv0[2], uv1[2], uvh[2], uvt[2];
+        sky::cloudUv(0.3f, 0.8f, -0.5f, 1.0f, 0.0f, 0.02f, uv0);
+        sky::cloudUv(0.3f, 0.8f, -0.5f, 2.0f, 0.0f, 0.02f, uvh);
+        EXPECT_MSG(nearEq(uvh[0], uv0[0] * 2.0f, 1e-4f) &&
+                       nearEq(uvh[1], uv0[1] * 2.0f, 1e-4f),
+                   "env_sky_clouds: a ALTURA NÃO ESCALA O PLANO das nuvens "
+                   "(uv %.3f×%.3f vs %.3f×%.3f)",
+                   (double)uvh[0], (double)uvh[1], (double)uv0[0],
+                   (double)uv0[1]);
+        sky::cloudUv(0.3f, 0.8f, -0.5f, 1.0f, 10.0f, 0.02f, uvt);
+        EXPECT_MSG(uvt[0] > uv0[0] && uvt[1] > uv0[1],
+                   "env_sky_clouds: O TEMPO NÃO EMPURRA O UV (a nuvem "
+                   "parada — M-Ye1 vermelho)");
+        // o piso da projeção: dir.y~0 não explode (o kPlaneEps de sempre)
+        sky::cloudUv(0.3f, 0.01f, -0.5f, 1.0f, 0.0f, 0.0f, uv1);
+        EXPECT_MSG(std::isfinite(uv1[0]) && std::isfinite(uv1[1]) &&
+                       std::fabs(uv1[0]) < 100.0f,
+                   "env_sky_clouds: o horizonte EXPLODIU o uv (o piso "
+                   "kPlaneEps morreu)");
+        // a altura 1 = o céu da D byte a byte (o kCloudScale entra 1×)
+        f32 uvD[2];
+        sky::cloudUv(0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f, uvD);
+        EXPECT_MSG(nearEq(uvD[0], sky::kCloudScale * 0.0f, 1e-6f),
+                   "env_sky_clouds: a altura 1 não é o plano da D");
+    }
+    // (2) AS ESTRELAS — determinísticas, esparsas (o threshold mata ~72%
+    // das células) e CHEIAS no centro do ponto (o offset vem do hash)
+    {
+        EXPECT_MSG(sky::starField(0.3f, 0.4f, 0.5f) ==
+                       sky::starField(0.3f, 0.4f, 0.5f),
+                   "env_sky_clouds: o campo de estrelas NÃO é "
+                   "determinístico (o hash morreu)");
+        // a dispersão: num varrimento amplo HÁ células vazias E estrelas
+        u32 vazias = 0, vivas = 0;
+        f32 mx = 0.0f;
+        for (int i = 1; i < 24; ++i) {
+            for (int j = 1; j < 24; ++j) {
+                const Vec3 d = normalized(Vec3{
+                    static_cast<f32>(i) * 0.173f - 2.0f,
+                    static_cast<f32>(j) * 0.091f + 0.05f,
+                    -0.62f});
+                const f32 s = sky::starField(d.x, d.y, d.z);
+                if (s <= 0.0f) {
+                    ++vazias;
+                } else {
+                    ++vivas;
+                    if (s > mx) mx = s;
+                }
+            }
+        }
+        EXPECT_MSG(vazias > 0 && vivas > 0,
+                   "env_sky_clouds: o campo de estrelas não é ESTOCÁSTICO "
+                   "(vazias=%u vivas=%u — o threshold morreu)", vazias,
+                   vivas);
+        EXPECT_MSG(mx <= 1.0f,
+                   "env_sky_clouds: a estrela saiu de [0,1] (mx=%.3f)",
+                   (double)mx);
+        // o centro de uma célula COM estrela vale ~1 (o ponto inteiro)
+        bool achou = false;
+        for (int x = -8; x < 8 && !achou; ++x) {
+            for (int y = 4; y < 40 && !achou; ++y) {
+                for (int z = -8; z < 8 && !achou; ++z) {
+                    const u32 h = sky::hash3u(x, y, z);
+                    if ((h & 0xFFu) >= 184u) {
+                        const f32 ox = 0.2f + 0.6f *
+                            static_cast<f32>((h >> 8u) & 0xFFu) / 255.0f;
+                        const f32 oy = 0.2f + 0.6f *
+                            static_cast<f32>((h >> 16u) & 0xFFu) / 255.0f;
+                        const f32 oz = 0.2f + 0.6f *
+                            static_cast<f32>((h >> 24u) & 0xFFu) / 255.0f;
+                        const f32 sx = (static_cast<f32>(x) + ox) /
+                                       sky::kStarDensity;
+                        const f32 sy = (static_cast<f32>(y) + oy) /
+                                       sky::kStarDensity;
+                        const f32 sz = (static_cast<f32>(z) + oz) /
+                                       sky::kStarDensity;
+                        EXPECT_MSG(nearEq(sky::starField(sx, sy, sz), 1.0f,
+                                          1e-4f),
+                                   "env_sky_clouds: o CENTRO da estrela não "
+                                   "vale 1 (o raio morreu)");
+                        achou = true;
+                    }
+                }
+            }
+        }
+        EXPECT_MSG(achou,
+                   "env_sky_clouds: nenhuma célula acima do threshold "
+                   "(o campo inteiro morreu)");
+    }
+    // (3) O COMPONENTE — os defaults do ciclo + a clamp (o relógio dá a
+    // volta, a altura vive em [0.25,4])
+    {
+        Environment e;
+        EXPECT_MSG(nearEq(e.timeOfDay, 12.0f, 1e-6f) &&
+                       nearEq(e.dayCycleSpeed, 0.0f, 1e-6f) &&
+                       !e.autoCycle &&
+                       nearEq(e.cloudHeight, 1.0f, 1e-6f),
+                   "env_sky_clouds: os defaults do ciclo (12h / 0 / off / "
+                   "1.0 — a identidade da D)");
+        e.timeOfDay = 25.5f;    // a volta: 25.5h é 1.5h
+        e.cloudHeight = 9.0f;
+        e.dayCycleSpeed = -0.3f;
+        e.clampFields();
+        EXPECT_MSG(nearEq(e.timeOfDay, 1.5f, 1e-5f),
+                   "env_sky_clouds: o relógio NÃO dá a volta em 24h "
+                   "(25.5 → %.3f)", (double)e.timeOfDay);
+        EXPECT_MSG(nearEq(e.cloudHeight, 4.0f, 1e-6f) &&
+                       nearEq(e.dayCycleSpeed, 0.0f, 1e-6f),
+                   "env_sky_clouds: a altura teto 4 e a velocidade piso 0");
+        e.timeOfDay = -2.0f;
+        e.cloudHeight = 0.05f;
+        e.clampFields();
+        EXPECT_MSG(nearEq(e.timeOfDay, 22.0f, 1e-5f),
+                   "env_sky_clouds: o relógio negativo NÃO modula "
+                   "(-2 → %.3f)", (double)e.timeOfDay);
+        EXPECT_MSG(nearEq(e.cloudHeight, 0.25f, 1e-6f),
+                   "env_sky_clouds: a altura piso 0.25");
+        EXPECT_MSG(Environment::kTodMax == 24.0f &&
+                       Environment::kCycleMax == 1.0f,
+                   "env_sky_clouds: os tetos do ciclo (24h, vel 1.0)");
+    }
+    // (4) O CONTRATO NO FONTE (o FS replica as puras — sem comentários)
+    {
+        std::string src;
+        ASSERT(readFile(repoRoot() +
+                        "/app/src/main/cpp/render/SkyRenderer.cpp",
+                        src));
+        const std::string code = test::stripCppComments(src);
+        EXPECT_MSG(countSub(code, "uniform float uHeight;") >= 1,
+                   "env_sky_clouds: o FS perdeu o uniform uHeight");
+        EXPECT_MSG(countSub(code, "uniform float uStars;") >= 1,
+                   "env_sky_clouds: o FS perdeu o uniform uStars");
+        EXPECT_MSG(countSub(code, "(kCloudScale * uHeight)") >= 1,
+                   "env_sky_clouds: a ALTURA saiu do UV das nuvens no FS "
+                   "(a expressão do contrato)");
+        EXPECT_MSG(countSub(code, "float starField(vec3 dir)") >= 1,
+                   "env_sky_clouds: o FS perdeu o campo de estrelas");
+        EXPECT_MSG(countSub(code, "if (uStars > 0.001)") >= 1,
+                   "env_sky_clouds: o branch UNIFORME das estrelas morreu "
+                   "(o dia paga o campo inteiro)");
+    }
+    // (5) O DRAW REAL no stub — os uniforms novos EXISTEM e a ordem do
+    // uTime (o ÚLTIMO 1f — o contrato do pin da D) sobrevive aos 2 novos
+    {
+        glstub::fb::enabled = true;
+        glstub::fb::resetState();
+        glstub::reset();
+        SkyRenderer s;
+        ASSERT(s.init());
+        s.use();
+        const GLint locH =
+            glGetUniformLocation(glstub::fb::curProg_, "uHeight");
+        const GLint locS =
+            glGetUniformLocation(glstub::fb::curProg_, "uStars");
+        EXPECT_MSG(locH >= 0 && locS >= 0,
+                   "env_sky_clouds: uHeight/uStars não existem no programa");
+        SkyRenderer::Params p;
+        p.height = 2.5f;
+        p.stars = 0.8f;
+        p.time = 7.25f;
+        const DrawStats st = s.draw(p);
+        EXPECT_MSG(st.vertices == 4 && st.drawCalls == 1,
+                   "env_sky_clouds: o céu deixou de ser UM quad");
+        EXPECT_MSG(glstub::stats.lastUniform1f == 7.25f,
+                   "env_sky_clouds: o uTime deixou de ser o ÚLTIMO 1f do "
+                   "draw (%.2f — a ordem da D é o contrato)",
+                   (double)glstub::stats.lastUniform1f);
+        s.destroy();
+        glstub::fb::enabled = false;
+        glstub::fb::resetState();
+    }
+}
+
+// ---- PIN env_daynight_cycle (0.12-Y-E) ----------------------------------------
+// A ordem do dono: «timeOfDay 0..24 + dayCycleSpeed; o shader calcula o
+// ÂNGULO do sol; o gradiente e a luz interpolam entre 00:00 noite (escuro,
+// estrelas, luar), 06:00 amanhecer (laranja/rosa), 12:00 meio-dia (azul,
+// sol no zénite) e 18:00 pôr do sol (vermelho/laranja); a DIRECTIONAL roda
+// em sincronia (mais fraca e alaranjada ao pôr do sol)». As PURAS + a
+// identidade do meio-dia (o byte a byte da D) + o wiring no main + o lit.
+TEST(env_daynight_cycle) {
+    const f32 hor[3] = {0.29f, 0.56f, 0.89f};
+    const f32 zen[3] = {0.12f, 0.23f, 0.54f};
+    const f32 sun[3] = {1.0f, 0.87f, 0.67f};
+    // (1) O ÂNGULO DO SOL — 06h nasce a leste, 12h no zénite, 18h a oeste,
+    // 00h sob o mundo; SEMPRE normalizada
+    {
+        f32 d[3];
+        sky::sunDirFromTime(6.0f, d);
+        EXPECT_MSG(d[0] > 0.85f && std::fabs(d[1]) < 0.35f,
+                   "env_daynight_cycle: às 06h o sol NÃO NASCE a leste "
+                   "(%.2f, %.2f)", (double)d[0], (double)d[1]);
+        sky::sunDirFromTime(12.0f, d);
+        EXPECT_MSG(d[1] > 0.85f,
+                   "env_daynight_cycle: às 12h o sol NÃO está no zénite "
+                   "(y=%.2f)", (double)d[1]);
+        sky::sunDirFromTime(18.0f, d);
+        EXPECT_MSG(d[0] < -0.85f,
+                   "env_daynight_cycle: às 18h o sol NÃO se põe a oeste "
+                   "(x=%.2f)", (double)d[0]);
+        sky::sunDirFromTime(0.0f, d);
+        EXPECT_MSG(d[1] < 0.0f,
+                   "env_daynight_cycle: à meia-noite o sol NÃO está sob o "
+                   "mundo (y=%.2f)", (double)d[1]);
+        const f32 len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        EXPECT_MSG(nearEq(len, 1.0f, 1e-5f),
+                   "env_daynight_cycle: a direção do sol não NORMALIZA");
+    }
+    // (2) A GRADE — a identidade no meio-dia (o byte a byte da D), a noite
+    // ESCURA com estrelas (o teste do dono: 20h), o calor do amanhecer e
+    // do pôr do sol, o luar fraco, a continuidade
+    {
+        sky::SkyGrade g;
+        sky::dayNightGrade(12.0f, hor, zen, sun, g);
+        EXPECT_MSG(g.hor[0] == hor[0] && g.hor[1] == hor[1] &&
+                       g.hor[2] == hor[2] && g.zen[0] == zen[0] &&
+                       g.zen[2] == zen[2] && g.sun[1] == sun[1],
+                   "env_daynight_cycle: o meio-dia NÃO é a identidade (as "
+                   "cores do utilizador tinham de voltar byte a byte)");
+        EXPECT_MSG(g.stars == 0.0f,
+                   "env_daynight_cycle: estrelas ao MEIO-DIA (o gate morreu)");
+        // O TESTE DO DONO: 20h = céu ESCURO + estrelas
+        sky::dayNightGrade(20.0f, hor, zen, sun, g);
+        const f32 lum = 0.2126f * g.hor[0] + 0.7152f * g.hor[1] +
+                        0.0722f * g.hor[2];
+        EXPECT_MSG(lum < 0.16f,
+                   "env_daynight_cycle: às 20h o céu NÃO fica escuro "
+                   "(lum=%.3f — M-Ye2 vermelho)", (double)lum);
+        EXPECT_MSG(g.stars > 0.5f,
+                   "env_daynight_cycle: às 20h NÃO há estrelas (%.2f — o "
+                   "gate da noite morreu)", (double)g.stars);
+        EXPECT_MSG(0.2126f * g.light[0] + 0.7152f * g.light[1] +
+                       0.0722f * g.light[2] < 0.35f,
+                   "env_daynight_cycle: o LUAR da noite não é fraco");
+        // o amanhecer/pôr do sol: o horizonte mais QUENTE que azul (r > b)
+        sky::dayNightGrade(6.0f, hor, zen, sun, g);
+        EXPECT_MSG(g.hor[0] > g.hor[2],
+                   "env_daynight_cycle: às 06h o horizonte não é laranja/"
+                   "rosa (r=%.2f b=%.2f)", (double)g.hor[0], (double)g.hor[2]);
+        sky::dayNightGrade(18.0f, hor, zen, sun, g);
+        EXPECT_MSG(g.hor[0] > g.hor[2],
+                   "env_daynight_cycle: às 18h o horizonte não é vermelho/"
+                   "laranja (r=%.2f b=%.2f)", (double)g.hor[0],
+                   (double)g.hor[2]);
+        EXPECT_MSG(g.stars > 0.0f && g.stars < 0.5f,
+                   "env_daynight_cycle: as estrelas do crepúsculo saíram do "
+                   "meio-termo (%.2f)", (double)g.stars);
+        // a escada das estrelas: noite > crepúsculo > meio-dia = 0
+        sky::SkyGrade gn, gd, gz;
+        sky::dayNightGrade(0.0f, hor, zen, sun, gn);
+        sky::dayNightGrade(6.0f, hor, zen, sun, gd);
+        sky::dayNightGrade(12.0f, hor, zen, sun, gz);
+        EXPECT_MSG(gn.stars > gd.stars && gd.stars > gz.stars,
+                   "env_daynight_curve: a escada das estrelas inverteu");
+        // a continuidade: os vizinhos do meio-dia e o fecho do anel 0≈24
+        sky::SkyGrade ga, gb;
+        sky::dayNightGrade(11.9f, hor, zen, sun, ga);
+        sky::dayNightGrade(12.1f, hor, zen, sun, gb);
+        EXPECT_MSG(nearEq(ga.hor[0], gb.hor[0], 0.06f) &&
+                       nearEq(ga.stars, gb.stars, 0.06f),
+                   "env_daynight_cycle: a grade SALTA no meio-dia (a "
+                   "interpolação suave morreu)");
+        sky::dayNightGrade(0.0f, hor, zen, sun, ga);
+        sky::dayNightGrade(24.0f, hor, zen, sun, gb);
+        EXPECT_MSG(nearEq(ga.hor[0], gb.hor[0], 1e-5f) &&
+                       nearEq(ga.stars, gb.stars, 1e-5f),
+                   "env_daynight_cycle: o anel 0h/24h não fecha");
+    }
+    // (3) O WIRING NO FONTE — o main consome a grade + o sol + a luz (as
+    // puras chegam ao frame; SEM comentários — a prosa não satisfaz)
+    {
+        std::string src;
+        ASSERT(readFile(repoRoot() + "/app/src/main/cpp/platform/main.cpp",
+                        src));
+        const std::string code = test::stripCppComments(src);
+        EXPECT_MSG(countSub(code, "sky::dayNightGrade(") >= 1,
+                   "env_daynight_cycle: o main deixou de consumir a GRADE "
+                   "(M-Ye2 — o tempo deixou de mudar a cor)");
+        EXPECT_MSG(countSub(code, "sky::sunDirFromTime(") >= 1,
+                   "env_daynight_cycle: o sol deixou de rodar pelo relógio");
+        EXPECT_MSG(countSub(code, "setLight(") >= 1,
+                   "env_daynight_cycle: a DIRECTIONAL deixou de receber o "
+                   "sol (a luz não sincroniza)");
+        // a identidade da luz de sempre (o kLightDir do lit preservado)
+        EXPECT_MSG(countSub(code, "0.4545f, 0.7435f, 0.2891f") >= 1,
+                   "env_daynight_cycle: a identidade da luz de sempre "
+                   "desapareceu do main (o lit sem Environment diverge)");
+    }
+    // (4) O LIT NO FONTE — os uniforms novos + a identidade (a cor 1.0 não
+    // muda o lit de sempre)
+    {
+        std::string src;
+        ASSERT(readFile(repoRoot() + "/app/src/main/cpp/render/Material.cpp",
+                        src));
+        const std::string code = test::stripCppComments(src);
+        EXPECT_MSG(countSub(code, "uniform vec3 uLightDir;") >= 1 &&
+                       countSub(code, "uniform vec3 uLightCol;") >= 1,
+                   "env_daynight_cycle: o lit perdeu os uniforms da "
+                   "directional (uLightDir/uLightCol)");
+        EXPECT_MSG(countSub(code,
+                            "uLightCol * (alb * mdiff * diff") >= 1,
+                   "env_daynight_cycle: a COR da luz não entra na difusa/"
+                   "especular (a expressão do contrato morreu)");
+        EXPECT_MSG(countSub(code, "dot(n, uLightDir)") >= 1,
+                   "env_daynight_cycle: a difusa não aponta para "
+                   "uLightDir (o sol parado no lit)");
+    }
+}
+
+// ---- PIN env_serialize (0.12-Y-E) ---------------------------------------------
+// A ordem do dono: «o ficheiro de cena (.goni) guarda e carrega corretamente
+// o timeOfDay e as propriedades das nuvens». O roundtrip dos 4 campos novos
+// + os defaults FORA do dump (o forward-compat da casa — o .goni da D
+// carrega byte a byte).
+TEST(env_serialize) {
+    // (1) O ROUNDTRIP dos campos novos (não-defaults entram no dump)
+    {
+        Scene a;
+        const Handle h = a.create("Ciclo");
+        a.get(h)->addComponent<Transform3D>();
+        Environment* e = a.get(h)->addComponent<Environment>();
+        e->timeOfDay = 20.5f;
+        e->dayCycleSpeed = 0.4f;
+        e->autoCycle = true;
+        e->cloudHeight = 2.5f;
+        e->cloudCoverage = 0.7f;
+        e->clampFields();
+        const std::string dump = SceneSerializer::dump(a);
+        EXPECT_MSG(countSub(dump, "\"tod\"") == 1,
+                   "env_serialize: o .goni NÃO guarda o timeOfDay");
+        EXPECT_MSG(countSub(dump, "\"cycSpd\"") == 1 &&
+                       countSub(dump, "\"cycOn\"") == 1,
+                   "env_serialize: o .goni NÃO guarda o auto ciclo "
+                   "(velocidade/estado)");
+        EXPECT_MSG(countSub(dump, "\"cloudH\"") == 1,
+                   "env_serialize: o .goni NÃO guarda a altura das nuvens");
+        Scene b;
+        SceneSerializer::LoadCtx ctx;
+        ASSERT(SceneSerializer::loadText(b, dump, ctx));
+        const Handle hf = b.find("Ciclo");
+        ASSERT(hf.valid());
+        const Environment* e2 = b.get(hf)->getComponent<Environment>();
+        ASSERT(e2 != nullptr);
+        EXPECT_MSG(nearEq(e2->timeOfDay, 20.5f, 1e-5f) &&
+                       nearEq(e2->dayCycleSpeed, 0.4f, 1e-5f) &&
+                       e2->autoCycle &&
+                       nearEq(e2->cloudHeight, 2.5f, 1e-5f) &&
+                       nearEq(e2->cloudCoverage, 0.7f, 1e-5f),
+                   "env_serialize: o ciclo não volta do .goni (tod=%.2f "
+                   "spd=%.2f on=%d h=%.2f)",
+                   (double)e2->timeOfDay, (double)e2->dayCycleSpeed,
+                   e2->autoCycle ? 1 : 0, (double)e2->cloudHeight);
+    }
+    // (2) Os DEFAULTS ficam FORA do dump (o meio-dia/parado/desligado é o
+    // silêncio — o .goni antigo carrega igual)
+    {
+        Scene c;
+        const Handle hc = c.create("limpo");
+        c.get(hc)->addComponent<Transform3D>();
+        c.get(hc)->addComponent<Environment>();
+        const std::string dump2 = SceneSerializer::dump(c);
+        EXPECT_MSG(countSub(dump2, "\"tod\"") == 0 &&
+                       countSub(dump2, "\"cycSpd\"") == 0 &&
+                       countSub(dump2, "\"cycOn\"") == 0 &&
+                       countSub(dump2, "\"cloudH\"") == 0,
+                   "env_serialize: os defaults do ciclo INVADIRAM o .goni "
+                   "(o forward-compat morreu)");
+        // e o carregamento de um dump SEM os campos cai na identidade
+        Scene d;
+        SceneSerializer::LoadCtx ctx2;
+        ASSERT(SceneSerializer::loadText(d, dump2, ctx2));
+        const Handle hd = d.find("limpo");
+        const Environment* e3 = d.get(hd)->getComponent<Environment>();
+        ASSERT(e3 != nullptr);
+        EXPECT_MSG(nearEq(e3->timeOfDay, 12.0f, 1e-6f) && !e3->autoCycle &&
+                       nearEq(e3->cloudHeight, 1.0f, 1e-6f),
+                   "env_serialize: os defaults ausentes não caem na "
+                   "identidade do meio-dia");
+    }
+    // (3) A corrupção do relógio modula (o clampFields no load — 30h é 6h)
+    {
+        Scene a;
+        const Handle h = a.create("corrupto");
+        a.get(h)->addComponent<Transform3D>();
+        Environment* e = a.get(h)->addComponent<Environment>();
+        e->timeOfDay = 30.0f;
+        const std::string dump = SceneSerializer::dump(a);
+        Scene b;
+        SceneSerializer::LoadCtx ctx;
+        ASSERT(SceneSerializer::loadText(b, dump, ctx));
+        const Environment* e2 =
+            b.get(b.find("corrupto"))->getComponent<Environment>();
+        ASSERT(e2 != nullptr);
+        EXPECT_MSG(nearEq(e2->timeOfDay, 6.0f, 1e-5f),
+                   "env_serialize: o relógio corrompido não modula "
+                   "(30h → %.2f)", (double)e2->timeOfDay);
+    }
+}
+
+// ---- PIN inspector_daynight (0.12-Y-E) ----------------------------------------
+// A ordem do dono: «Na secção Environment do Inspector, slider timeOfDay
+// (0..24), checkbox/botão Auto Cycle, sliders cloudCoverage/cloudSpeed/
+// cloudHeight». O PLANO (a fonte única do Inspector): as 4 linhas novas
+// SÓ no procedural, na ORDEM, e a fórmula do rowCount em casa.
+TEST(inspector_daynight) {
+    const TextMetrics tm{};
+    Scene scene;
+    const Handle h = scene.create("ciclo");
+    scene.get(h)->addComponent<Transform3D>();
+    Environment* env = scene.get(h)->addComponent<Environment>();
+    ASSERT(env != nullptr);
+
+    // (1) MODO SÓLIDO: NENHUMA das 4 linhas novas (o M-Yd2 mantém a regra)
+    {
+        InspRow rows[64];
+        const u32 n = inspectorPlan(inspectorProfile(*scene.get(h)), tm,
+                                    false, 0, rows);
+        u32 tod = 0, cyc = 0, cycs = 0, hgt = 0;
+        for (u32 i = 0; i < n; ++i) {
+            if (rows[i].id == kInspectorEnvTod) ++tod;
+            if (rows[i].id == kInspectorEnvCyc) ++cyc;
+            if (rows[i].id == kInspectorEnvCycS) ++cycs;
+            if (rows[i].id == kInspectorEnvHgt) ++hgt;
+        }
+        EXPECT_MSG(tod == 0 && cyc == 0 && cycs == 0 && hgt == 0,
+                   "inspector_daynight: NO MODO SÓLIDO o ciclo NÃO entra "
+                   "(tod=%u cyc=%u cycs=%u hgt=%u)", tod, cyc, cycs, hgt);
+    }
+    // (2) MODO PROCEDURAL: as 4 linhas na ORDEM do dono (hora → ciclo →
+    // vel. → altura) DEPOIS das 5 da D e ANTES do céu sólido
+    {
+        env->skyType = Environment::kSkyTypeProcedural;
+        const InspProfile prof = inspectorProfile(*scene.get(h));
+        InspRow rows[64];
+        const u32 n = inspectorPlan(prof, tm, false, 0, rows);
+        i32 iTod = -1, iCyc = -1, iCycS = -1, iHgt = -1, iSpd = -1,
+            iSky = -1;
+        u32 tod = 0, cyc = 0, cycs = 0, hgt = 0;
+        for (u32 i = 0; i < n; ++i) {
+            const InspRow& r = rows[i];
+            if (r.id == kInspectorEnvTod) { ++tod; iTod = (i32)i; }
+            if (r.id == kInspectorEnvCyc) { ++cyc; iCyc = (i32)i; }
+            if (r.id == kInspectorEnvCycS) { ++cycs; iCycS = (i32)i; }
+            if (r.id == kInspectorEnvHgt) { ++hgt; iHgt = (i32)i; }
+            if (r.id == kInspectorEnvSpd) iSpd = (i32)i;
+            if (r.id == kInspectorEnvSky) iSky = (i32)i;
+        }
+        EXPECT_MSG(tod == 1 && cyc == 1 && cycs == 1 && hgt == 1,
+                   "inspector_daynight: as 4 linhas novas faltam ou "
+                   "duplicam (tod=%u cyc=%u cycs=%u hgt=%u)", tod, cyc,
+                   cycs, hgt);
+        EXPECT_MSG(iSpd >= 0 && iTod > iSpd && iCyc > iTod &&
+                       iCycS > iCyc && iHgt > iCycS && iSky > iHgt,
+                   "inspector_daynight: a ORDEM do dono morreu (spd=%d "
+                   "tod=%d cyc=%d cycs=%d hgt=%d sky=%d)", iSpd, iTod,
+                   iCyc, iCycS, iHgt, iSky);
+        // a contagem da FÓRMULA bate com o plano (as duas fontes uma só)
+        EXPECT_MSG(inspectorRowCount(prof, false, 0) == n,
+                   "inspector_daynight: a fórmula do rowCount divergiu do "
+                   "plano (%u vs %u)", inspectorRowCount(prof, false, 0),
+                   n);
+        // os IDS não colidem com os vizinhos da D (a colisão mata o toque)
+        EXPECT_MSG(kInspectorEnvTod != kInspectorEnvSpd &&
+                       kInspectorEnvCyc != kInspectorEnvHgt &&
+                       kInspectorEnvCycS != kInspectorEnvSky,
+                   "inspector_daynight: os ids novos colidem");
+    }
+}

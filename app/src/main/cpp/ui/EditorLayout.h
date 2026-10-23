@@ -194,6 +194,11 @@ constexpr u64 kInspectorEnvZen  = 5427;   // "zénite: #RRGGBB" (hex 14)
 constexpr u64 kInspectorEnvSunC = 5428;   // "sol: #RRGGBB" (hex 15)
 constexpr u64 kInspectorEnvCov  = 5429;   // slider nuvens 0..1
 constexpr u64 kInspectorEnvSpd  = 5430;   // slider vento 0..0.2
+// 0.12-Y-E — O CICLO DIA/NOITE (a secção procedural ganha 4 linhas)
+constexpr u64 kInspectorEnvTod  = 5431;   // slider hora 0..24
+constexpr u64 kInspectorEnvCyc  = 5432;   // botão auto ciclo (ligado|desligado)
+constexpr u64 kInspectorEnvCycS = 5433;   // slider vel. ciclo 0..1
+constexpr u64 kInspectorEnvHgt  = 5434;   // slider altura nuvens 0.25..4
 // 0.8.0 (F7) — primitiva procedural do MeshRenderer + animação
 constexpr u64 kInspectorPrimSel   = 5003;   // "prim: esfera ▸" (seletor)
 constexpr u64 kInspectorPrimR     = 5600;   // slider raio/size
@@ -410,6 +415,10 @@ struct InspRow {
         EnvSunC,     // "sol: #RRGGBB" + swatch (teclado hex 15)
         EnvCov,      // slider nuvens 0..1 (a cobertura)
         EnvSpd,      // slider vento 0..0.2 (a velocidade)
+        EnvTod,      // 0.12-Y-E: slider hora 0..24 (o relógio do dia)
+        EnvCyc,      // 0.12-Y-E: botão auto ciclo (o toggle da casa)
+        EnvCycS,     // 0.12-Y-E: slider vel. ciclo 0..1 (1 = 1h/s)
+        EnvHgt,      // 0.12-Y-E: slider altura nuvens 0.25..4
     };
     Kind kind;
     f32  y;     // topo da linha em COORDS DE CONTEÚDO (cumulativo)
@@ -566,7 +575,9 @@ inline u32 inspectorRowCount(const InspProfile& p, bool selectable,
         if (!(collapsed & kInspBitEnvironment)) {
             n += 1;   // o tipo de céu (3.Y-D — o dropdown sempre visível)
             if (p.envSkyType == Environment::kSkyTypeProcedural) {
-                n += 5;   // horizonte + zénite + sol + nuvens + vento
+                // 0.12-Y-E: 5 da D + hora + auto ciclo + vel. ciclo + altura
+                n += 9;   // horizonte, zénite, sol, nuvens, vento, hora,
+                          // ciclo, vel., altura
             }
             n += 5;   // céu + hdri + ambiente + névoa + cor da névoa
         }
@@ -759,6 +770,12 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
                 push(InspRow::Kind::EnvSunC, btnH, kInspectorEnvSunC);
                 push(InspRow::Kind::EnvCov, sldH, kInspectorEnvCov);
                 push(InspRow::Kind::EnvSpd, sldH, kInspectorEnvSpd);
+                // 0.12-Y-E: o CICLO DIA/NOITE (a hora, o auto ciclo, a
+                // velocidade e a altura das nuvens — a ordem do dono)
+                push(InspRow::Kind::EnvTod, sldH, kInspectorEnvTod);
+                push(InspRow::Kind::EnvCyc, btnH, kInspectorEnvCyc);
+                push(InspRow::Kind::EnvCycS, sldH, kInspectorEnvCycS);
+                push(InspRow::Kind::EnvHgt, sldH, kInspectorEnvHgt);
             }
             push(InspRow::Kind::EnvSky, btnH, kInspectorEnvSky);
             push(InspRow::Kind::EnvHdri, btnH, kInspectorEnvHdri);

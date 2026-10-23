@@ -33,6 +33,8 @@ uniform float uTanF;
 uniform float uTime;      // o relógio das nuvens (M-Yd1 vive AQUI)
 uniform float uSpeed;
 uniform float uCoverage;
+uniform float uHeight;    // 0.12-Y-E: a escala vertical das nuvens
+uniform float uStars;     // 0.12-Y-E: o gate das estrelas (o branch uniforme)
 uniform vec3 uHorizon;
 uniform vec3 uZenith;
 uniform vec3 uSunCol;
@@ -53,6 +55,11 @@ const float kHorizonFadeY = 0.15;
 const float kCloudShadow  = 0.75;
 const float kCloudLight   = 0.25;
 const float kCloudSunMix  = 0.35;
+// 0.12-Y-E — as constantes das estrelas (as MESMAS das puras)
+const float kStarDensity  = 60.0;
+const float kStarRadius   = 0.22;
+const float kStarThresh   = 184.0;
+const float kStarHorizonY = 0.08;
 
 float sstep(float e0, float e1, float x) {
     float d = e1 - e0;
@@ -106,20 +113,48 @@ float horizonFade(float dirY) {
     return sstep(kPlaneEps, kHorizonFadeY, dirY);
 }
 
+// a réplica de sky::hash3u / sky::starField (0.12-Y-E — as ESTRELAS: o
+// hash inteiro sem sin, o threshold de presença, o offset 0.2..0.8)
+float starField(vec3 dir) {
+    vec3 s = dir * kStarDensity;
+    vec3 g = floor(s);
+    ivec3 c = ivec3(g);
+    uint h = uint(c.x) * 374761393u + uint(c.y) * 668265263u
+           + uint(c.z) * 2246822519u;
+    h = (h ^ (h >> 13u)) * 1274126177u;
+    h ^= h >> 16u;
+    if (float(h & 0xFFu) < kStarThresh) {
+        return 0.0;
+    }
+    vec3 o = vec3(0.2) + 0.6 * vec3(float((h >> 8u) & 0xFFu),
+                                    float((h >> 16u) & 0xFFu),
+                                    float((h >> 24u) & 0xFFu)) / 255.0;
+    float d = length(s - g - o);
+    return 1.0 - sstep(0.0, kStarRadius, d);
+}
+
 void main() {
     // a direção da vista (a réplica de sky::viewDir — a FÓRMULA ÚNICA)
     vec3 dir = normalize(uFwd + vNdc.x * uAspect * uTanF * uRight
                               + vNdc.y * uTanF * uUp);
-    // o GRADIENTE (a réplica de sky::skyGradient)
+    // o GRADIENTE (a réplica de sky::skyGradient) — as cores chegam JÁ
+    // GRADUADAS pelo CPU (a grade dia/noite corre 1× por frame, nunca por
+    // pixel — a otimização do C33 no relatório 0.12-Y-E-SKY)
     float t = clamp(dir.y, 0.0, 1.0);
     vec3 col = uHorizon + (uZenith - uHorizon) * t;
     // o HALO antes das nuvens (atravessa o véu fino)
     float d = dot(dir, uSunDir);
     col += uSunCol * sunGlow(d);
-    // as NUVENS: a projeção planar + O VENTO (a réplica de sky::windOffset
-    // — o tempo × a velocidade no UV; o contrato vive SÓ na linha de código
-    // abaixo: os comentários NUNCA citam a expressão do pin)
-    vec2 cuv = dir.xz / max(dir.y, kPlaneEps) * kCloudScale
+    // as ESTRELAS (0.12-Y-E): o branch UNIFORME — o dia salta o campo
+    // inteiro; à noite os pontos morrem atrás das nuvens (o mix de baixo)
+    if (uStars > 0.001) {
+        float s = starField(dir) * uStars * sstep(0.0, kStarHorizonY, dir.y);
+        col += vec3(s);
+    }
+    // as NUVENS: a projeção planar + A ALTURA + O VENTO (a réplica de
+    // sky::cloudUv — o tempo × a velocidade no UV; o contrato vive SÓ na
+    // linha de código abaixo: os comentários NUNCA citam a expressão do pin)
+    vec2 cuv = dir.xz / max(dir.y, kPlaneEps) * (kCloudScale * uHeight)
              + vec2(kWindDirX, kWindDirY) * (uTime * uSpeed);
     float n = fbm2(cuv);
     float a = cloudAlpha(n, uCoverage) * horizonFade(dir.y);
@@ -183,6 +218,8 @@ bool SkyRenderer::init() {
     locTime_ = glGetUniformLocation(prog_, "uTime");
     locSpeed_ = glGetUniformLocation(prog_, "uSpeed");
     locCoverage_ = glGetUniformLocation(prog_, "uCoverage");
+    locHeight_ = glGetUniformLocation(prog_, "uHeight");   // 0.12-Y-E
+    locStars_ = glGetUniformLocation(prog_, "uStars");     // 0.12-Y-E
     locHor_ = glGetUniformLocation(prog_, "uHorizon");
     locZen_ = glGetUniformLocation(prog_, "uZenith");
     locSunCol_ = glGetUniformLocation(prog_, "uSunCol");
@@ -212,6 +249,7 @@ void SkyRenderer::destroy() {
     if (prog_) { glDeleteProgram(prog_); prog_ = 0; }
     locRight_ = locUp_ = locFwd_ = locAspect_ = locTanF_ = -1;
     locTime_ = locSpeed_ = locCoverage_ = -1;
+    locHeight_ = locStars_ = -1;
     locHor_ = locZen_ = locSunCol_ = locSunDir_ = -1;
     vertexCount_ = 0;
 }
@@ -241,6 +279,14 @@ DrawStats SkyRenderer::draw(const Params& p) const {
     }
     if (locCoverage_ >= 0) {
         glUniform1f(locCoverage_, p.coverage);
+    }
+    // 0.12-Y-E: a altura e as estrelas entram ANTES do uTime (o ÚLTIMO 1f
+    // é o contrato do pin da D — a ordem do draw é a fonte)
+    if (locHeight_ >= 0) {
+        glUniform1f(locHeight_, p.height);
+    }
+    if (locStars_ >= 0) {
+        glUniform1f(locStars_, p.stars);
     }
     if (locHor_ >= 0) {
         glUniform3f(locHor_, p.horizon[0], p.horizon[1], p.horizon[2]);
