@@ -768,3 +768,25 @@ pin AMBÍGUO — apertado para a linha exata, a lição M-UIj) → suíte 0
 falhas · c33_virtual 1008/0 · docs-lint VERDE · **versionCode 122** —
 o build vigente. O 121 fica INTACTO como história. (o relatório
 próprio: docs/RELATORIO-0.12-Y-F1-PARTICLES.md)
+
+### §14-m — 0.12-V (os 3 bugs do viewport 3D) — versionCode 123
+
+**G8** (o par declarado no MESMO commit, a regra do §14): o DIAGNÓSTICO
+COM FICHEIRO:LINHA antes de mexer (a ordem do dono) e a cura dos 3 bugs
+do viewport: (1) o TELEPORTE do arrasto — o feedback imediato escrevia
+world = TRS LOCAL (o mesh saltava para o gizmo durante o drag e voltava
+ao largar: «o modelo só aparece enquanto toco»); (2) o GIZMO fora do
+mundo dos TICs com pai (desenhava/hit-testava o tr->pos local-as-world
+enquanto o mesh desenha na TRANSLAÇÃO do world); (3) o TAMANHO variável
+(dist_da_órbita·k, sem tan(fov/2) — gigante perto do olho). A cura: a
+FONTE ÚNICA composeWorld no TransformSystem (o tick e o feedback
+partilham), worldToLocalPos (o drag corre no mundo, o TRS guarda local),
+gizmoAnchor (a MESMA origem+comprimento no hit e no draw) e a fórmula do
+dono dist·tan(fov/2)·k com o toque ≥48px. O importador/preset PROVADOS
+inocentes (o parenting veio da cena do dono — o motor não re-parenta).
+verificação: pins viewport_modelo_sem_gizmo · viewport_gizmo_no_mundo ·
+viewport_drag_sem_teleporte · viewport_gizmo_px_constante (o caminho
+REAL do device — sondas de píxel) + R-063 regress_viewport_gizmo_world +
+M-V1/M-V2/M-V3 VERMELHAS AO VIVO → suíte 0 falhas · c33_virtual 1008/0 ·
+gates VERDES · **versionCode 123** — o build vigente. O 122 fica INTACTO
+como história. (o relatório próprio: docs/RELATORIO-0.12-V-VIEWPORT.md)

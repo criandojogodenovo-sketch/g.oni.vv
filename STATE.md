@@ -1,8 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-23 · vc: 122 · Último commit: este (a 0.12-Y-F1 —
-O TIC PARTICLEEMITTER: as partículas GPU pelo VS; o
-RELATORIO-0.12-Y-F1-PARTICLES.md);
+Atualizado: 2026-10-24 · vc: 123 · Último commit: este (a 0.12-V — os 3
+BUGS DO VIEWPORT 3D: o teleporte do gizmo, a âncora no mundo, o tamanho
+em píxel constante; o RELATORIO-0.12-V-VIEWPORT.md);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -10,49 +10,42 @@ RELATORIO-0.12-Y-F1-PARTICLES.md);
 
 ## §1 Onde estamos
 
-- **Campanha FASE UI (O REDESIGN VISUAL, envios 1/5..5/5) — A..J
-  FECHADAS no código (vc 120; o CI VERDE em cada parte)** (a cláusula
-  calma: SÓ visual, layout e UX — core/V.ONI/importadores/física/
-  .gmesh intocados; um commit por parte; a história e os não-feitos no
-  RELATORIO-FASE-UI.md).
-  **A (vc 111)**: O FICHEIRO ÚNICO DE TOKENS com a paleta EXATA do dono
-  (fundo #0B0B0D · painéis #121215 · elementos #1B1B20 · linhas
-  #26262C · texto #E8E6E3/#8A8A93 · A BRASA ÚNICA #FF5A1F · seleção
-  #2B1810 · eixos #E5484D/#3FB950/#3B82F6) + a escala 4/8/12/16 + raios
-  6-8 + o espelho Java; ui_tokens_brasa + M-UIa.
-  **B (vc 112)**: A BARRA 40DP — a direita nova (undo/redo/guardar em
-  TODOS os modos), o Pause na PLAY BAR, o «Android» nas Definições, o
-  chip ⋯; O ACHADO DO CI (a sonda 35.2): a cura + o build_c33.py NOVO;
-  ui_topbar_40dp_composicao + M-UIb; c33 1009/0.
-  **C (vc 113)**: A HIERARQUIA 40DP — o OLHO e o ⋮ SÓ na selecionada, o
-  nome inteiro e a indentação pela escala; ui_hierarquia_40dp + M-UIc.
-  **D (vc 114)**: O VIEWPORT — a coluna das 4 FERRAMENTAS (o ativo É a
-  brasa), o Íman e a MÃO em CHIPS, os divisores e a persistência;
-  ui_divisores_persistencia + M-UId.
-  **E (vc 115)**: O INSPECTOR — o cabeçalho do TIC (o NOME em brasa +
-  o TIPO; 44dp), a BARRINHA do eixo, o vazio com o «+ criar TIC»;
-  ui_inspector_cabecalho + M-UIe.
-  **F (vc 116)**: A BARRA FINA + O PAINEL ENCAIXADO — o «Painéis ▾» +
-  o estado «60 FPS · 6 TICs», as 4 TABS na FILA 40dp (o viewport SOBE),
-  a ÚLTIMA aba lembrada, a timeline cabendo e o PONTO VERMELHO do erro;
-  ui_paineis_dock + M-UIf.
-  **G (vc 117)**: AS FOLHAS CONTIDAS — o teto de 85% (kSheetMaxPct), a
-  reserva da barra no navegador, o X de fechar no menu (7411);
-  ui_sheets_conteudos + M-UIg.
-  **H (vc 118)**: O EDITOR DE CÓDIGO — o TIC + os exportáveis, as ABAS
-  (em brasa; teto 6), o undo/redo por evento, o MONO do 2.º atlas e a
-  banda da linha corrente; AS CAUSAS no §11 (o cap 256→512; o follow
-  só-no-evento); M-UIh.
-  **I (vc 119)**: AS ABAS ÁUDIO E UI — o ÁUDIO com o ORÇAMENTO VERTICAL
-  (o rótulo CLIPS FIXO fora do scroll, a waveform FIXA 80dp, o modal de
-  apagar 40dp); o UI com o vazio LEGÍVEL + o «+» claro; M-UIi.
-  **J (vc 120)**: A TELA DE PROJETOS — O ÍCONE DA ENGINE no fallback do
-  card (as letras morreram) e o Importar SECUNDÁRIO neutro (a brasa só
-  no «Novo projeto»); M-UIj.
+- **Campanha 0.12-V (OS 3 BUGS DO VIEWPORT 3D) — FECHADA no código
+  (vc 123; o CI VERDE em cada parte)** (a cláusula calma: SÓ
+  viewport/gizmo/render do editor + testes — física, V.ONI,
+  importador glTF e tema INTACTOS; a história no
+  RELATORIO-0.12-V-VIEWPORT.md).
+  **V (vc 123)**: o DIAGNÓSTICO com ficheiro:linha antes de mexer (a
+  ordem do dono) e a cura: (1) o TELEPORTE do arrasto — o feedback
+  imediato escrevia world = TRS LOCAL (o mesh saltava para o gizmo
+  durante o drag e voltava ao largar); (2) o GIZMO ancorado no
+  tr->pos local-as-world (o mesh desenha na TRANSLAÇÃO do world);
+  (3) o TAMANHO variável (dist_da_órbita·k, sem tan(fov/2)). A cura: a
+  FONTE ÚNICA TransformSystem::composeWorld (o tick e o feedback
+  partilham) + worldToLocalPos (o drag corre no mundo, o TRS guarda
+  local) + gizmoAnchor (a MESMA origem+comprimento no hit e no draw) +
+  a fórmula do dono dist·tan(fov/2)·kScreenLen (k 0.16; o toque ≥48px).
+  O importador/preset PROVADOS inocentes (GltfInstantiate.cpp:82-86,
+  Presets.cpp:54, SceneSerializer.cpp:1789-1794). pins ×4
+  (viewport_modelo_sem_gizmo · _gizmo_no_mundo · _drag_sem_teleporte ·
+  _px_constante — o caminho REAL com sondas de píxel) + R-063 +
+  M-V1/V2/V3 VERMELHAS AO VIVO.
 
-- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A..E, o
-  C-FIX e a F1 fechadas, vc 122)** (a cláusula calma: SÓ o prompt; a
-  V.ONI intocada; a história no RELATORIO-0.12-Y-*.md).
+- **Campanha FASE UI (O REDESIGN VISUAL) — A..J FECHADAS (vc 111..120,
+  o CI VERDE em cada parte; um commit por parte; a história e os
+  não-feitos no RELATORIO-FASE-UI.md)**: A o FICHEIRO ÚNICO DE TOKENS
+  (a paleta exata do dono) · B a BARRA 40DP (o achado do CI: a sonda
+  35.2 + o build_c33.py) · C a HIERARQUIA 40DP · D o VIEWPORT (a
+  coluna das 4 ferramentas) · E o INSPECTOR (o cabeçalho do TIC) · F a
+  BARRA FINA + o painel encaixado (as 4 TABS, o estado em mono) · G as
+  FOLHAS CONTIDAS (o teto 85%) · H o EDITOR DE CÓDIGO (o MONO do 2.º
+  atlas; as causas no §11 do relatório) · I as ABAS ÁUDIO E UI (o
+  orçamento vertical) · J a TELA DE PROJETOS (o ícone da engine + o
+  Importar secundário). Pins ×10 + M-UIa..j.
+
+- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — A..E, o C-FIX e a
+  F1 fechadas (vc 106..122)** (a cláusula calma: SÓ o prompt; a
+  V.ONI intocada; a história nos RELATORIO-0.12-Y-*.md).
   **F1 (vc 122)**: o TIC PARTICLEEMITTER (no
   RELATORIO-0.12-Y-F1-PARTICLES.md) — VERTEX SHADER ANIMATION (GLES 3.0,
   ZERO compute): o CPU gera UMA VEZ o VBO de seeds (teto 2000; o slider

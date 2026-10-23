@@ -35,22 +35,63 @@ void composeAt(u32 slot,
         composeAt(static_cast<u32>(p), done, visiting, worldBySlot,
                   parentBySlot);
         if (!visiting[static_cast<u32>(p)] || done[static_cast<u32>(p)]) {
-            // world = parentWorld ∘ local (a MESMA ordem do glTF — o
-            // worldChainOf do conversor compõe raiz→folha igual)
-            tr.world = Mat4::mul(
-                worldBySlot[static_cast<u32>(p)]->world, tr.computeMatrix());
-            tr.worldDirty = false;   // o cache é freshly-composto
+            // 0.12-V: a FONTE ÚNICA da composição (o MESMO contrato dos
+            // sites de feedback imediato — o tick e o drag partilham)
+            TransformSystem::composeWorld(
+                tr, &worldBySlot[static_cast<u32>(p)]->world);
             visiting[slot] = 0;
             done[slot] = 1;
             return;
         }
     }
-    tr.updateWorld();   // raiz (ou pai sem transform): o local de sempre
+    TransformSystem::composeWorld(tr, nullptr);   // raiz (ou pai sem transform)
     visiting[slot] = 0;
     done[slot] = 1;
 }
 
 } // namespace
+
+void TransformSystem::composeWorld(Transform3D& tr, const Mat4* parentWorld) {
+    if (parentWorld != nullptr) {
+        // world = parentWorld ∘ local (a MESMA ordem do glTF — o
+        // worldChainOf do conversor compõe raiz→folha igual)
+        tr.world = Mat4::mul(*parentWorld, tr.computeMatrix());
+    } else {
+        tr.world = tr.computeMatrix();
+    }
+    tr.worldDirty = false;   // o cache é freshly-composto
+}
+
+Vec3 TransformSystem::worldToLocalPos(const Transform3D& parent,
+                                      const Vec3& worldPos) {
+    // TRS puro: parentWorld = T·R·S → inversa = S⁻¹·R⁻¹·T⁻¹.
+    // d = p_mundo − pos; R⁻¹ = conj(R); divisão componente a componente pela
+    // escala (guard ε — pai degenerado devolve o local do mundo tal como está
+    // no eixo morto, nunca inf/NaN).
+    const Vec3 d = worldPos - parent.pos;
+    const Quat inv{-parent.rot.x, -parent.rot.y, -parent.rot.z, parent.rot.w};
+    const Vec3 r = inv.rotate(d);
+    const f32 sx = std::fabs(parent.scale.x) > 1e-8f ? parent.scale.x : 1.0f;
+    const f32 sy = std::fabs(parent.scale.y) > 1e-8f ? parent.scale.y : 1.0f;
+    const f32 sz = std::fabs(parent.scale.z) > 1e-8f ? parent.scale.z : 1.0f;
+    return Vec3{r.x / sx, r.y / sy, r.z / sz};
+}
+
+const Transform3D* TransformSystem::parentTransformOf(Scene& scene,
+                                                      i32 parentSlot) {
+    if (parentSlot < 0) {
+        return nullptr;
+    }
+    const Transform3D* out = nullptr;
+    scene.forEachActive([&](Tic& t) {
+        if (out != nullptr ||
+            static_cast<i32>(t.handle.index) != parentSlot) {
+            return;
+        }
+        out = t.getComponent<Transform3D>();
+    });
+    return out;
+}
 
 void TransformSystem::tick(Scene& scene, f32 /*dt*/) {
     // F3: cada transform é independente — world = TRS(pos, rot, scale) —

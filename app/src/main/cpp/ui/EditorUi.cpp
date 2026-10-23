@@ -21,6 +21,7 @@
 #include "render/Primitives.h"            // 0.8.0: seletor de primitivas
 #include "render/Mesh.h"                 // 0.8.9: AABB do mesh (normalização uniforme)
 #include "core/Scene.h"
+#include "core/TransformSystem.h"   // 0.12-V: o feedback imediato compõe com o pai
 #include "core/Project.h"   // 0.12-B (B-4): kDirScenes (o caminho das cenas)
 #include "ui/UiEditor.h"                  // 0.8.6: uiHexFormat (linha hex)
 #include "ui/Icons.h"                    // 0.9.0: conjunto outline (spec A)
@@ -63,6 +64,18 @@ constexpr u64 kIdRowBase   = 1000;
 constexpr u64 kIdAssetBase = 6000;   // F5-E: itens do seletor de assets
 // ids do Inspector (sliders/botões) vivem em ui/EditorLayout.h — o PLANO é
 // a fonte única das posições E dos ids (F5.0-fix).
+
+// 0.12-V — O FEEDBACK IMEDIATO DO INSPECTOR NO CONTRATO DO TICK: escreveu
+// pos/rot/scale → compõe o cache COM O PAI (world = parentWorld ∘ TRS — a
+// FONTE ÚNICA TransformSystem::composeWorld). O updateWorld() de antes
+// escrevia world = TRS local (a raiz de sempre) — num TIC COM PAI o mesh
+// teleportava UM FRAME para o local-as-world e voltava (a mesma causa do
+// gizmo da 0.12-V). Sem pai: byte a byte (composeWorld raiz).
+void refreshWorldWithParent(Scene& scene, const Tic& tic, Transform3D& tr) {
+    const Transform3D* parentTr =
+        TransformSystem::parentTransformOf(scene, tic.parent);
+    TransformSystem::composeWorld(tr, parentTr ? &parentTr->world : nullptr);
+}
 
 // Toque (edge de press) fora do rect → fecha overlays.
 bool pressedOutside(const InputState& in, f32 x, f32 y, f32 w, f32 h) {
@@ -3026,7 +3039,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         tr->pos = Vec3{posArr[0], posArr[1], posArr[2]};
         tr->rot = Quat::fromEuler(deg2rad(rotDeg[0]), deg2rad(rotDeg[1]), deg2rad(rotDeg[2]));
         tr->scale = Vec3{sclArr[0], sclArr[1], sclArr[2]};
-        tr->updateWorld();   // feedback imediato (TransformSystem reconfirma)
+        refreshWorldWithParent(scene, *tic, *tr);   // 0.12-V: compõe com o pai
     }
 
     // 0.8.0 (F7) / 0.8.10 — parâmetros de primitiva mudaram: assinatura
@@ -3156,7 +3169,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                         } else {
                             tr->scale = Vec3{1.0f, 1.0f, 1.0f};
                         }
-                        tr->updateWorld();
+                        refreshWorldWithParent(scene, *tic, *tr);   // 0.12-V
                     }
                 }
                 }
@@ -3385,7 +3398,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 Transform3D* trSo = tic->getComponent<Transform3D>();
                 if (trSo) {
                     trSo->scale = Vec3{1.0f, 1.0f, 1.0f};
-                    trSo->updateWorld();
+                    refreshWorldWithParent(scene, *tic, *trSo);   // 0.12-V
                 } else if (Transform3D* trNew =
                                tic->addComponent<Transform3D>()) {
                     trNew->scale = Vec3{1.0f, 1.0f, 1.0f};
@@ -5045,7 +5058,7 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
                         }
                     }
                     tr->scale = Vec3{s, s, s};   // UM fator, TRÊS eixos
-                    tr->updateWorld();
+                    refreshWorldWithParent(scene, *tic, *tr);   // 0.12-V
                 }
                 // F5.1-B: textura embutida do glTF/GLB aplica-se logo
                 // (import sem PC — o material fica referenciado)

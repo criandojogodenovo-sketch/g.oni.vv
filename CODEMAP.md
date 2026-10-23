@@ -1,17 +1,23 @@
 # CODEMAP.md — onde vive o quê
 
-Atualizado: 2026-10-19 · vc: 105
+Atualizado: 2026-10-24 · vc: 123
 
+> 0.12-V: a composição parent∘local tem FONTE ÚNICA no
+> app/src/main/cpp/core/TransformSystem.h (composeWorld — o tick E o
+> feedback do gizmo/Inspector partilham; worldToLocalPos é a inversa
+> TRS do pai); a geometria do gizmo (a TRANSLAÇÃO do world + a fórmula
+> dist·tan(fov/2)·k do app/src/main/cpp/ui/Gizmo.h) vive no gizmoAnchor
+> do main (o MESMO par no hit e no draw); pins: test_012v_viewport.
 > 0.12-E (E-1 · EMERGÊNCIA): o SDF de widget (D-1), o vidro (D-2) e o
-> fogo (D-3) estão DORMENTES (a ordem do dono abortou o SDF 3D) — os
-> símbolos vivem com ZERO chamadores: o app/src/main/cpp/ui/Sdf.h, o
+> fogo (D-3) estão DORMENTES (a ordem do dono abortou o SDF 3D) — ZERO
+> chamadores: o app/src/main/cpp/ui/Sdf.h, o
 > app/src/main/cpp/render/SdfBatch.h, o app/src/main/cpp/ui/Glass.h, o
 > app/src/main/cpp/ui/Fire.h, o progSdf_/captureGlass do
-> app/src/main/cpp/render/Renderer.cpp e os emissores
-> sdfWidget/sdfWidgetGlass/glassPanelFake/sdfFireBorder/fireGlowBelow/
-> drawEmbers. O desenho do produto é o SIMPLES 2D (Y-1) + os EFEITOS
-> 2.5D da E-3 (o app/src/main/cpp/ui/Noise2D.h, o fireBorder2D, o
-> dropShadow, o surface α0.85, o topo ÂMBAR 20%). O LOGO de D-4
+> app/src/main/cpp/render/Renderer.cpp e os emissores sdfWidget/
+> sdfWidgetGlass/glassPanelFake/sdfFireBorder/fireGlowBelow/drawEmbers.
+> O desenho do produto é o SIMPLES 2D (Y-1) + os EFEITOS 2.5D da E-3 (o
+> app/src/main/cpp/ui/Noise2D.h, o fireBorder2D, o dropShadow, o
+> surface α0.85, o topo ÂMBAR 20%). O LOGO de D-4
 > (app/src/main/cpp/ui/Brand.h/.cpp) segue VIVO (segmentos 2D — nunca
 > foi SDF).
 >
@@ -52,12 +58,12 @@ Atualizado: 2026-10-19 · vc: 105
 - **app/src/main/cpp/core/** — o motor puro: Scene/Tic (a unidade é TIC),
   SceneSerializer (`.goni`: `dump`/`loadText`), ProjectStorage/FsStorage/
   SafStorage (SAF; **0.12-QoL D**: o `modifiedTime` — o default −1 é o
-  desconhecido honesto, o FsStorage devolve o stat), **0.12-QoL D**:
-  AutoSave.h (as DECISÕES PURAS — o kPeriodSec 180, o due, o decide) +
-  o Project::saveAutosave/loadAutosave (o autosave.goni NA RAIZ — o
-  .goni principal INTACTO), Tick.h (o `TickGroup` + `TickGroups::add`),
-  UndoStack, VoniSystem, Bench (R-017), AssetPersist, SceneTic.h (TIC +
-  Transform3D).
+  desconhecido honesto), **0.12-QoL D**: AutoSave.h (as DECISÕES PURAS —
+  o kPeriodSec 180, o due, o decide) + o Project::saveAutosave/
+  loadAutosave (o autosave.goni NA RAIZ), Tick.h (o `TickGroup` +
+  `TickGroups::add`), UndoStack, VoniSystem, Bench (R-017), AssetPersist,
+  SceneTic.h (TIC + Transform3D), **0.12-V**: TransformSystem.h (o
+  composeWorld é a FONTE ÚNICA da composição parent∘local).
 - **app/src/main/cpp/render/** — o desenho: Renderer, Mesh, Camera, Grid,
   Cube/Primitives, Material (+ o PBR-LITE pela FONTE ÚNICA **Pbr.h** — o
   normal por derivadas, o rough/metal glTF, a névoa exp2 (0 = MORTA), o
@@ -65,19 +71,16 @@ Atualizado: 2026-10-19 · vc: 105
   BlockMesh (por BLOCOS do .gmesh v3), Impostor.h (a decisão PURA),
   QuadBatch, DrawStats, ThumbPng (PNG via zlib), SkyRenderer.{h,cpp}
   (**0.12-Y D**: o CÉU PROCEDURAL — o quad fullscreen + as puras sky:: que o FS replica).
-  **0.12-D (DORMENTE desde a 0.12-E)**: D-1 o SdfBatch.h (1 widget = 1
-  quad de 18 floats) + o 3.º PROGRAMA progSdf_ (o FS replica o
-  app/src/main/cpp/ui/Sdf.h LINHA A LINHA; os runs pelo flag `sdf`,
-  os buffers POR submissão) + D-3 o ramo FOGO-ONLY (aShape.w=1, a chama
-  aditiva GL_SRC_ALPHA/GL_ONE, uSdfTime/uFire1/uFire3) replicando o
+  **0.12-D (DORMENTE desde a 0.12-E)**: D-1 o SdfBatch.h + o 3.º
+  PROGRAMA progSdf_ (o FS replica o app/src/main/cpp/ui/Sdf.h LINHA A
+  LINHA; runs pelo flag `sdf`) + D-3 o ramo FOGO-ONLY replicando o
   app/src/main/cpp/ui/Fire.h + D-2 o app/src/main/cpp/ui/Glass.h (o
-  KAWASE dual, a cache glassCacheDirty) + o captureGlass (o readPixels
-  com flip, o blur, o upload) + o ramo uSdfTexOn (o vidro amostra a cena
-  × glassInk).
+  KAWASE dual, a cache glassCacheDirty) + o captureGlass + o ramo
+  uSdfTexOn.
 - **app/src/main/cpp/assets/** — importadores e formatos GL-free:
   GOwnFormats (.gmesh/.gtext/.gm), GmeshV3Stream (o streaming do
   conversor), GltfImporter/GltfAnim/GltfTextures/GltfInstantiate (os
-  **5 SLOTS** na PASTA assets/<stem>/textures/ + o bind auto; **0.12-Y**),
+  **5 SLOTS** na PASTA assets/<stem>/textures/ + o bind auto),
   ObjImporter, PngLoader, TexturePipeline/TexturePolicy/TextureCache,
   MipGen, ThumbRender/ThumbIndex, ImpostorIndex (o pico de RAM é UM
   bloco, R-041), AstcCompressor/Etc2Compressor + vendor/.
@@ -195,18 +198,15 @@ Atualizado: 2026-10-19 · vc: 105
   pré-carregado com o nome atual; o alvo em textScene).
 - **tests/** — a suíte do core (C++17, GL-free): test_main.cpp (o runner,
   GONI_ONLY/GONI_SKIP), TestFramework.h (o TEST/EXPECT), test_sentinels.cpp
-  (as sentinelas regress_* — **0.12-QoL**: R-056 o auto-save, R-057 o
-  navegador, R-058 o viewport), test_ctx_pines.cpp (os pins dos índices da
-  0.11-CTX), test_fase_y0_icone.cpp (o ícone launcher da 0.11-Y),
-  test_fase_y1_tema.cpp (o TEMA da 0.11-Y), test_fase_y2_layout.cpp (o
-  LAYOUT), test_fase_y3_cristal.cpp (o CRISTAL), test_fase375b_impostors.cpp,
-  test_012a_lodui.cpp (os pins da 0.12-A A-1: as rows LOD/impostor da
-  UI — row_existe/aplica/persiste/compat/default_off),
-  test_012a_contadores.cpp (os pins da 0.12-A A-2: os contadores pelo
-  UV do atlas + o marcador de cena), test_012a_grelha_tooltip.cpp (os
-  pins da 0.12-A A-3: o scissor3dRect + o ciclo do tooltip),
-  test_012b_uitree.cpp (os pins da B-1: a árvore de UI),
-  test_012b_inspui.cpp (os pins da B-2: o Inspector de UI),
+  (as sentinelas regress_* — R-056/057/058...), test_ctx_pines.cpp (os
+  pins dos índices da 0.11-CTX), test_fase_y0_icone.cpp (o ícone
+  launcher da 0.11-Y), test_fase_y1_tema.cpp (o TEMA),
+  test_fase_y2_layout.cpp (o LAYOUT), test_fase_y3_cristal.cpp (o
+  CRISTAL), test_fase375b_impostors.cpp, test_012a_lodui.cpp (os pins
+  da 0.12-A A-1), test_012a_contadores.cpp (A-2),
+  test_012a_grelha_tooltip.cpp (A-3), test_012b_uitree.cpp (B-1),
+  test_012b_inspui.cpp (B-2), test_012v_viewport.cpp (**0.12-V**: os 4
+  pins do viewport pelo caminho REAL — sondas de píxel),
   test_012b_canvas.cpp (os pins da B-3: a moldura + as guias + o
   toast), test_012b_cenas.cpp (os pins da B-4: cena_rename/
   cena_duplicate/cena_delete_confirm — o 2-tap, M-B4a — e

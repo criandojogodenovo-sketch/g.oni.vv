@@ -36,7 +36,10 @@ struct Env {
         const f32 aspect = kSW / kSH;
         vp = Mat4::mul(cam.proj(aspect), cam.view());
         basis = viewBasis(cam, aspect);
-        len = gizmoLength(cam.dist);
+        // 0.12-V: a fórmula nova — o gizmo destes testes vive NO FOCO da
+        // órbita (dist(olho→gizmo) == cam.dist), logo o valor é o par de
+        // sempre escalado por tan(30°) (tamanho de ecrã constante).
+        len = gizmoLength(cam.dist, std::tan(cam.fovY * 0.5f));
     }
 
     // px,py projetados de um ponto do mundo
@@ -564,7 +567,7 @@ TEST(gizmo_grab_raio_generoso_agarra_ligeiramente_fora) {
     const f32 dx = tipx - ox, dy = tipy - oy;
     const f32 n = std::sqrt(dx * dx + dy * dy);
     EXPECT(n > 1.0f);
-    const f32 off = 40.0f;   // > kHitAxisPx (22), < kGrabPx (44)
+    const f32 off = 40.0f;   // > kHitAxisPx (22), < kGrabPx (48, 0.12-V)
     const f32 px = tipx + dx / n * off;
     const f32 py = tipy + dy / n * off;
     // hover (raio fino): NÃO destaca
@@ -689,7 +692,7 @@ TEST(gizmo_grab_rotate_ancora_do_angulo_capturada) {
 TEST(gizmo_grab_scale_centro_ancora_da_distancia_capturada) {
     Env e;
     // dedo no handle central (escalar uniforme): ~40 px do centro
-    // projetado (dentro do alvo generoso de 44 px, fora do eixo)
+    // projetado (dentro do alvo generoso de 48 px, fora do eixo)
     f32 ox = 0.0f, oy = 0.0f;
     EXPECT(e.proj(Vec3{}, ox, oy));
     const f32 cx = ox + 32.0f;

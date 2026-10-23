@@ -570,6 +570,19 @@ Vec3 axisDirLocal(gizmo::Axis a) {
     }
 }
 
+// 0.12-V — A GEOMETRIA ÚNICA DO GIZMO (o hit-test e o desenho partilham):
+// a ORIGEM é a TRANSLAÇÃO do world (o MESMO sítio onde o mesh desenha —
+// o pass 3D consome tr->world; o gizmo em tr->pos ficava no local-as-world
+// dos TICs com pai) e o COMPRIMENTO é tamanho de ecrã constante pela
+// fórmula do dono — distância DO OLHO ATÉ AO GIZMO · tan(fov/2) · k
+// (kScreenLen; nunca g_camera.dist da órbita nem a escala do objeto).
+Vec3 gizmoAnchor(const Transform3D& tr, f32 tanHalfFov, f32& lenOut) {
+    const Vec3 pos{tr.world.m[12], tr.world.m[13], tr.world.m[14]};
+    const Vec3 delta = g_camera.eye() - pos;
+    lenOut = gizmo::gizmoLength(length(delta), tanHalfFov);
+    return pos;
+}
+
 void applyGizmoDrag(const gizmo::Grab& grab, const gizmo::ViewBasis& basis,
                     f32 sw, f32 sh, f32 px, f32 py);
 
@@ -690,7 +703,12 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len,
             if (const Tic* tc = g_scene.get(g_editor.selected)) {
                 if (const Transform3D* trc =
                         tc->getComponent<Transform3D>()) {
-                    g_gizmo.anchorPos = trc->pos;
+                    // 0.12-V — a âncora do MOVER é a TRANSLAÇÃO do world (o
+                    // drag corre no mundo; sem pai, world == local — byte a
+                    // byte). Rotate/Scale continuam com as âncoras LOCAIS.
+                    g_gizmo.anchorPos = Vec3{trc->world.m[12],
+                                             trc->world.m[13],
+                                             trc->world.m[14]};
                     g_gizmo.anchorRot = trc->rot;
                     g_gizmo.anchorScale = trc->scale;
                     // 0.7.7 — o ESCALAR numa câmara escala o FRUSTUM (fov/
@@ -805,6 +823,11 @@ void applyGizmoDrag(const gizmo::Grab& grab, const gizmo::ViewBasis& basis,
     }
     const gizmo::Axis a = grab.target;
     const bool snap = g_gizmoMode.snap;
+    // 0.12-V — O PAI do TIC selecionado: o drag corre NO MUNDO (o dedo vê
+    // o mundo); o Transform3D guarda o TRS LOCAL. O pai é resolvido UMA vez
+    // por frame de drag (evento — nunca no caminho quente do render).
+    const Transform3D* parentTr =
+        TransformSystem::parentTransformOf(g_scene, t->parent);
 
     if (g_gizmo.mode == gizmo::Mode::Move) {
         // 0.7.9 — hit AGORA no plano FIXO do grab (o raio é o do grab):
@@ -815,14 +838,22 @@ void applyGizmoDrag(const gizmo::Grab& grab, const gizmo::ViewBasis& basis,
         if (!ok1) {
             return;
         }
+        // 0.12-V — o alvo do drag é NO MUNDO (a âncora é a TRANSLAÇÃO do
+        // world capturada no grab); sem pai, mundo == local (byte a byte).
+        Vec3 worldTarget{0.0f, 0.0f, 0.0f};
         if (a == gizmo::Axis::X || a == gizmo::Axis::Y || a == gizmo::Axis::Z) {
-            tr->pos = gizmo::dragMoveAxis(g_gizmo.anchorPos,
-                                          axisDirLocal(a), h0, h1, snap);
+            worldTarget = gizmo::dragMoveAxis(g_gizmo.anchorPos,
+                                              axisDirLocal(a), h0, h1, snap);
         } else {
             // plano de drag (XY/XZ/YZ) — normal FIXA do grab
-            tr->pos = gizmo::dragMovePlane(g_gizmo.anchorPos, grab.planeNormal,
-                                           h0, h1, snap);
+            worldTarget = gizmo::dragMovePlane(g_gizmo.anchorPos,
+                                               grab.planeNormal, h0, h1,
+                                               snap);
         }
+        tr->pos = parentTr
+                      ? TransformSystem::worldToLocalPos(*parentTr,
+                                                         worldTarget)
+                      : worldTarget;
     } else if (g_gizmo.mode == gizmo::Mode::Rotate) {
         const Vec3 axis = axisDirLocal(a);
         // ângulo do dedo em torno do CENTRO do GRAB (estável sob orbit)
@@ -848,10 +879,11 @@ void applyGizmoDrag(const gizmo::Grab& grab, const gizmo::ViewBasis& basis,
                                              axisDirLocal(a), h0, h1, snap);
         }
     }
-    // escreve no Transform3D COM worldDirty: o cache é recalculado já neste
-    // frame (feedback imediato) e o TransformSystem reconfirma no passo
-    tr->updateWorld();
-    tr->worldDirty = false;   // cache coerente com a nova pose
+    // 0.12-V — O FEEDBACK IMEDIATO NO CONTRATO DO TICK: o cache compõe com
+    // o PAI (world = parentWorld ∘ TRS — a FONTE ÚNICA composeWorld), não
+    // mais o updateWorld() local-as-world que teleportava o mesh durante o
+    // arrasto (o TransformSystem reconfirma no próximo passo de sempre).
+    TransformSystem::composeWorld(*tr, parentTr ? &parentTr->world : nullptr);
 }
 
 DrawStats g_lastUiStats;   // métricas do pass UI (disponíveis 1 frame depois)
@@ -6701,11 +6733,16 @@ void frame() {
         const Mat4 gvp = Mat4::mul(gproj, gview);
         const gizmo::ViewBasis gbasis =
             gizmo::viewBasis(g_camera, viewRect.w / viewRect.h);
-        const f32 glen = gizmo::gizmoLength(g_camera.dist);
+        // 0.12-V — A GEOMETRIA ÚNICA: origem no MUNDO + comprimento pela
+        // fórmula do dono (o MESMO par que o draw de baixo consome — o
+        // hit-test nunca diverge do desenho)
+        f32 gizmoLen = 0.0f;
+        const Vec3 gizmoPos = gizmoAnchor(*gizmoTr, gbasis.tanHalfFov,
+                                          gizmoLen);
         // sincroniza o modo/snap da toolbar com o estado do gizmo
         g_gizmo.mode = static_cast<gizmo::Mode>(g_gizmoMode.mode);
         g_gizmo.snap = g_gizmoMode.snap;
-        gizmoClaimed = feedGizmo(gvp, gizmoTr->pos, glen, viewRect, gbasis);
+        gizmoClaimed = feedGizmo(gvp, gizmoPos, gizmoLen, viewRect, gbasis);
     } else {
         g_gizmo.active = gizmo::Axis::None;
         g_gizmo.hovered = gizmo::Axis::None;
@@ -7344,8 +7381,15 @@ void frame() {
                                      gizmoTr != nullptr)) {
         // GRUPO D: o gizmo desenha RETO-LOCAL + origem (consistente com o
         // feedGizmo e o aspect do rect)
-        gizmo::drawGizmo(g_ui, vp, gizmoTr->pos,
-                         gizmo::gizmoLength(g_camera.dist), g_gizmo.mode,
+        // 0.12-V — O MESMO par (mundo, comprimento) do feedGizmo: a origem
+        // é a TRANSLAÇÃO do world (o mesh é que lá está) e o comprimento é
+        // o tamanho de ecrã constante pela fórmula do dono — o desenho e o
+        // hit-test partilham a MESMA geometria (gizmoAnchor).
+        f32 gizmoLenDraw = 0.0f;
+        const Vec3 gizmoPosDraw =
+            gizmoAnchor(*gizmoTr, std::tan(g_camera.fovY * 0.5f),
+                        gizmoLenDraw);
+        gizmo::drawGizmo(g_ui, vp, gizmoPosDraw, gizmoLenDraw, g_gizmo.mode,
                          g_gizmo.hovered, viewRect.w, viewRect.h, viewRect.x,
                          viewRect.y);
     }

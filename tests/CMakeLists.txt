@@ -68,6 +68,10 @@ add_executable(test_core
         test_playui.cpp
         # 0.6.9: gizmos de transformação (hit-test/drag/snapping/desenho)
         test_gizmo.cpp
+        # 0.12-V: os 3 BUGS DO VIEWPORT 3D (o modelo invisível sem gizmo, o
+        # gizmo fora do mundo dos TICs com pai, o tamanho em píxel variável)
+        # — o caminho REAL (o padrão do wiring087: inclui platform/main.cpp)
+        test_012v_viewport.cpp
         # F6: wiring do seletor de textura (dispatch puro + sequência do
         # main + bind no stub GL + round-trip .goni — o fix do C33 0.6.9)
         test_assetpick.cpp

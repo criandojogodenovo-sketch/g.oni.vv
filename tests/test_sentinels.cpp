@@ -57,6 +57,7 @@
 #include "components/CameraComp.h"
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
+#include "core/TransformSystem.h"   // 0.12-V (R-063): composeWorld/worldToLocalPos
 #include "components/AnimationPlayer.h"   // 0.11-T (R-045): o cull do system
 #include "components/SkeletonComp.h"
 #include "core/AnimationSystem.h"          // 0.11-T (R-045)
@@ -8741,5 +8742,119 @@ TEST(regress_particles) {
                            std::string::npos,
                    "R-062: o Inspector deixou de escrever no emissor "
                    "(M-Yf2 — o slider adornado)");
+    }
+}
+
+// ============================================================================
+// R-063 (0.12-V) — O GIZMO E O MUNDO DOS TICs COM PAI NÃO DIVERGEM —
+//         regress_viewport_gizmo_world
+//
+// Os 3 bugs do viewport do dono (C33): (1) o modelo só APARECIA durante o
+// arrasto do gizmo (o feedback imediato escrevia world = TRS LOCAL — o mesh
+// teleportava para o gizmo e voltava ao largar); (2) o gizmo
+// desenhava/hit-testava no tr->pos LOCAL como se fosse MUNDO (fora do mesh
+// nos TICs com pai — o mesh desenha na TRANSLAÇÃO do world); (3) o gizmo
+// media dist_da_órbita·k (sem tan(fov/2), sem a distância ATÉ ao gizmo) —
+// gigante perto do olho, minúsculo longe. A cura: composeWorld (a FONTE
+// ÚNICA da composição — o tick e o feedback partilham), worldToLocalPos (o
+// drag corre no mundo, o TRS guarda local), gizmoAnchor (a MESMA geometria
+// no hit e no draw) e a fórmula do dono dist·tan(fov/2)·k com o toque ≥48px.
+// ============================================================================
+TEST(regress_viewport_gizmo_world) {
+    using namespace vv;
+    // (1) A COMPOSIÇÃO ÚNICA (core/TransformSystem — o MESMO contrato do
+    //     tick): o filho RODADO+ESCALADO segue o pai; o mundo→local devolve
+    //     o local; a raiz fica byte a byte (world = TRS)
+    {
+        Scene scene;
+        const Handle hP = scene.create("pai");
+        Transform3D* tp = scene.get(hP)->addComponent<Transform3D>();
+        tp->pos = Vec3{0.0f, 1.6f, 0.0f};
+        tp->rot = Quat::fromEuler(0.0f, 0.5f, 0.0f);
+        tp->scale = Vec3{2.0f, 2.0f, 2.0f};
+        TransformSystem::composeWorld(*tp, nullptr);
+        EXPECT_MSG(nearEqF(tp->world.m[13], 1.6f, 1e-5f),
+                   "R-063: a composição da RAIZ mudou (o comportamento de "
+                   "sempre é byte a byte)");
+        const Handle hF = scene.create("filho", static_cast<i32>(hP.index));
+        Transform3D* tf = scene.get(hF)->addComponent<Transform3D>();
+        tf->pos = Vec3{1.0f, 0.0f, 0.0f};
+        tf->scale = Vec3{0.5f, 0.5f, 0.5f};
+        TransformSystem::composeWorld(*tf, &tp->world);
+        // a translação do mundo do filho = parentWorld·(1,0,0)
+        const Vec3 w{tf->world.m[12], tf->world.m[13], tf->world.m[14]};
+        EXPECT_MSG(nearEqF(w.x, 2.0f * std::cos(0.5f), 1e-4f) &&
+                       nearEqF(w.y, 1.6f, 1e-4f) &&
+                       nearEqF(w.z, -2.0f * std::sin(0.5f), 1e-4f),
+                   "R-063: o mundo do FILHO deixou de compor parent∘local "
+                   "(a árvore do import desenha despedaçada)");
+        // o MUNDO→LOCAL do pai devolve o TRS LOCAL (a conversa do gizmo)
+        const Vec3 loc = TransformSystem::worldToLocalPos(*tp, w);
+        EXPECT_MSG(test::vecNearF(loc, Vec3{1.0f, 0.0f, 0.0f}, 1e-4f),
+                   "R-063: o mundo→local do pai degenerou (o drag do gizmo "
+                   "perde o alvo)");
+        // o resolver do pai (o slot do Tic::parent; -1 = sem pai)
+        EXPECT(TransformSystem::parentTransformOf(scene,
+                                                  static_cast<i32>(hP.index)) == tp);
+        EXPECT(TransformSystem::parentTransformOf(scene, -1) == nullptr);
+    }
+    // (2) A FÓRMULA DO DONO NO FONTE (SEM comentários — a lição M-Yd1) e o
+    //     mínimo de toque 48 px
+    {
+        std::string gz;
+        EXPECT(readFileText(REPO_ROOT "/app/src/main/cpp/ui/Gizmo.h", gz));
+        const std::string code = test::stripCppComments(gz);
+        EXPECT_MSG(code.find(
+                       "return distToGizmo * tanHalfFov * kScreenLen;") !=
+                       std::string::npos,
+                   "R-063: a fórmula do tamanho saiu de Gizmo.h (o Bug 3 "
+                   "volta — M-V3)");
+        EXPECT_MSG(code.find("kGrabPx = 48.0f") != std::string::npos,
+                   "R-063: o mínimo de toque 48 px saiu (M-V3)");
+    }
+    // (3) O MAIN partilha a MESMA geometria no hit e no draw (gizmoAnchor)
+    //     e o drag converte mundo→local + compõe o feedback com o pai
+    {
+        std::string mn;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/platform/main.cpp", mn));
+        const std::string code = test::stripCppComments(mn);
+        EXPECT_MSG(code.find("gizmoAnchor(*gizmoTr, gbasis.tanHalfFov") !=
+                       std::string::npos,
+                   "R-063: o feed do gizmo deixou de usar gizmoAnchor "
+                   "(a âncora local-as-world volta — M-V2)");
+        EXPECT_MSG(code.find("gizmoAnchor(*gizmoTr, "
+                             "std::tan(g_camera.fovY * 0.5f)") !=
+                       std::string::npos,
+                   "R-063: o draw do gizmo deixou de usar gizmoAnchor "
+                   "(o desenho diverge do hit — M-V2)");
+        EXPECT_MSG(code.find(
+                       "TransformSystem::worldToLocalPos(*parentTr") !=
+                       std::string::npos,
+                   "R-063: o drag deixou de converter mundo→local (o TIC "
+                   "com pai move-se rodado pelo pai — M-V1)");
+        EXPECT_MSG(code.find("TransformSystem::composeWorld(*tr, parentTr ? "
+                             "&parentTr->world : nullptr);") !=
+                       std::string::npos,
+                   "R-063: o feedback do drag deixou de compor com o pai "
+                   "(o teleporte do Bug 1 volta — M-V1)");
+    }
+    // (4) O INSPECTOR compõe com o pai (os sítios de feedback — o mesmo
+    //     contrato do drag; a contagem apanha a remoção furtiva)
+    {
+        std::string ui;
+        EXPECT(readFileText(REPO_ROOT "/app/src/main/cpp/ui/EditorUi.cpp",
+                            ui));
+        const std::string code = test::stripCppComments(ui);
+        int sites = 0;
+        for (size_t pos = code.find("refreshWorldWithParent(");
+             pos != std::string::npos;
+             pos = code.find("refreshWorldWithParent(", pos + 1)) {
+            ++sites;
+        }
+        EXPECT_MSG(sites >= 4,
+                   "R-063: o Inspector deixou de compor com o pai "
+                   "(sítios=%d < 4 — o teleporte volta nos edits — M-V1)",
+                   sites);
     }
 }

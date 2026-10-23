@@ -6391,14 +6391,22 @@ int main() {
                       "16.1 D17 o gizmo ancora NO GLIFO (quads âmbar no olho — d)");
                 // ---- O TESTE DE GESTO INJETADO (o pin do dono): um drag
                 // começado FORA dos handles move a câmara
-                const f32 len = gizmo::gizmoLength(g_camera.dist);
+                // 0.12-V: a fórmula nova (distAtéGizmo · tan(fov/2) · k) —
+                // o gizmo deste replay vive na ORIGEM e o olho a cam.dist,
+                // logo distAtéGizmo == cam.dist (o mesmo par de sempre
+                // escalado por tan(30°); o press adapta-se ao segmento)
+                const f32 len = gizmo::gizmoLength(
+                    g_camera.dist, std::tan(g_camera.fovY * 0.5f));
                 f32 ax = 0.0f, ay = 0.0f;
-                // o press no MEIO do segmento do eixo X (o gizmo reclama o
-                // gesto em TODO o segmento; a ponta encostava ao canto do
-                // preview canónico do D20)
-                check(gizmo::projectPoint(vpSel, Vec3{len * 0.5f, 0.0f, 0.0f},
+                // o press a 85% do segmento do eixo X (o gizmo reclama o
+                // gesto em TODO o segmento). 0.12-V: a fórmula nova deixa o
+                // gizmo ×tan(30°) mais curto (tamanho de ecrã constante) —
+                // o MEIO aproximou-se do glifo e a folga de 12dp ao handle
+                // morria; a 85% o press fica no segmento, longe do glifo E
+                // da ponta (que encostava ao preview canónico do D20)
+                check(gizmo::projectPoint(vpSel, Vec3{len * 0.85f, 0.0f, 0.0f},
                                           vr1.w, vr1.h, ax, ay, vr1.x, vr1.y),
-                      "16.1 D17 o meio do eixo X projeta");
+                      "16.1 D17 o 85% do eixo X projeta");
                 // fora dos handles: a distância a CADA canto do far > 60px
                 // o press está no SEGMENTO do eixo X (o gizmo reclama o
                 // gesto ANTES dos handles — a ordem (e) do dono); a prova

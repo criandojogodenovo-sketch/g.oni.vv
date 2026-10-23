@@ -64,9 +64,10 @@ static_assert(kAxisX[0] == theme::kTheme.axisX[0] && kAxisZ[2] == theme::kTheme.
 // Center→cinza; hover em qualquer um → kAxisHover)
 const f32* axisColor(Axis a, bool hovered);
 
-// tamanho de ecrã CONSTANTE: comprimento do gizmo no mundo = kScreenLen
-// px projetados a 1 u de distância → len_world = dist * kScreenLen.
-inline constexpr f32 kScreenLen = 0.16f;   // ~16% da distância da câmara
+// 0.12-V — O k ÚNICO do tamanho de ecrã (a faixa do dono: 0.10..0.18): o
+// gizmo ocupa k/2 da ALTURA do ecrã em píxeis, em qualquer distância/FOV —
+// a fórmula completa vive no gizmoLength(distToGizmo, tanHalfFov).
+inline constexpr f32 kScreenLen = 0.16f;
 
 // espessuras dos traços (px de ecrã)
 inline constexpr f32 kLineW     = 5.0f;    // eixo/seta
@@ -87,7 +88,9 @@ inline constexpr f32 kHitCenterPx = 26.0f;   // handle central
 // mínimo de toque do Android; o hover continua fino — 22 px — para o
 // destaque não "acender" meio viewport). "grab ligeiramente fora ainda
 // agarra" (C33: dedos gordos em ecrã de 720 px de altura).
-inline constexpr f32 kGrabPx = 44.0f;
+// 0.12-V: 44→48 — o MÍNIMO do dono (~48 px de área de toque; o raio é do
+// press edge, o hover fino continua kHitAxisPx).
+inline constexpr f32 kGrabPx = 48.0f;
 
 // snapping
 inline constexpr f32 kSnapMove   = 0.5f;    // unidades de mundo (grid)
@@ -238,8 +241,16 @@ void drawGizmo(UiContext& ui, const Mat4& vp, const Vec3& origin, f32 len,
                Mode mode, Axis hovered, f32 vw = 0.0f, f32 vh = 0.0f,
                f32 ox = 0.0f, f32 oy = 0.0f);
 
-// comprimento no mundo para tamanho de ecrã constante
-inline f32 gizmoLength(f32 camDist) { return camDist * kScreenLen; }
+// 0.12-V — TAMANHO DE ECRÃ CONSTANTE (a fórmula do dono): o comprimento do
+// gizmo no mundo é distância_ATÉ_ao_GIZMO · tan(fov/2) · k, com k = kScreenLen
+// como ÚNICA constante (0.16 — na faixa 0.10..0.18 do dono). Em píxeis:
+// len/(2·dist·tan)·alturadeecrã = k/2 · altura — CONSTANTE em zoom, distância,
+// FOV e tamanho do objeto (nunca a escala do objeto dimensiona o gizmo).
+// O chamador mede a distância do OLHO ao gizmo (a que o ecrã vê), NUNCA a
+// distância da órbita ao foco.
+inline f32 gizmoLength(f32 distToGizmo, f32 tanHalfFov) {
+    return distToGizmo * tanHalfFov * kScreenLen;
+}
 
 } // namespace gizmo
 } // namespace vv
