@@ -1,7 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-23 · vc: 121 · Último commit: este (a 0.12-Y-E — o
-CICLO DIA/NOITE; o RELATORIO-0.12-Y-E-SKY.md);
+Atualizado: 2026-10-23 · vc: 122 · Último commit: este (a 0.12-Y-F1 —
+O TIC PARTICLEEMITTER: as partículas GPU pelo VS; o
+RELATORIO-0.12-Y-F1-PARTICLES.md);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -10,40 +11,38 @@ CICLO DIA/NOITE; o RELATORIO-0.12-Y-E-SKY.md);
 ## §1 Onde estamos
 
 - **Campanha FASE UI (O REDESIGN VISUAL, envios 1/5..5/5) — A..J
-  FECHADAS no código (vc 120; o CI é o árbitro de cada parte)** (a
-  cláusula calma: SÓ visual, layout e UX — core/V.ONI/importadores/
-  física/.gmesh intocados; um commit por parte, CI verde entre elas; a
-  história no RELATORIO-FASE-UI.md, os não-feitos no §8).
-  **A (vc 111)**: O FICHEIRO ÚNICO DE TOKENS com a paleta do dono (os
-  hexes EXATOS da ordem: fundo #0B0B0D · painéis #121215 · elementos
-  #1B1B20 · linhas #26262C · texto #E8E6E3/#8A8A93 · A BRASA ÚNICA
-  #FF5A1F · seleção #2B1810 · eixos #E5484D/#3FB950/#3B82F6) + a escala
-  4/8/12/16 + raios 6-8 + o espelho Java; ui_tokens_brasa + M-UIa.
+  FECHADAS no código (vc 120; o CI VERDE em cada parte)** (a cláusula
+  calma: SÓ visual, layout e UX — core/V.ONI/importadores/física/
+  .gmesh intocados; um commit por parte; a história e os não-feitos no
+  RELATORIO-FASE-UI.md).
+  **A (vc 111)**: O FICHEIRO ÚNICO DE TOKENS com a paleta EXATA do dono
+  (fundo #0B0B0D · painéis #121215 · elementos #1B1B20 · linhas
+  #26262C · texto #E8E6E3/#8A8A93 · A BRASA ÚNICA #FF5A1F · seleção
+  #2B1810 · eixos #E5484D/#3FB950/#3B82F6) + a escala 4/8/12/16 + raios
+  6-8 + o espelho Java; ui_tokens_brasa + M-UIa.
   **B (vc 112)**: A BARRA 40DP — a direita nova (undo/redo/guardar em
   TODOS os modos), o Pause na PLAY BAR, o «Android» nas Definições, o
   chip ⋯; O ACHADO DO CI (a sonda 35.2): a cura + o build_c33.py NOVO;
   ui_topbar_40dp_composicao + M-UIb; c33 1009/0.
-  **C (vc 113)**: A HIERARQUIA — as linhas 40dp, o OLHO e o ⋮ SÓ na
-  selecionada, o nome inteiro e a indentação pela escala;
-  ui_hierarquia_40dp + M-UIc.
+  **C (vc 113)**: A HIERARQUIA 40DP — o OLHO e o ⋮ SÓ na selecionada, o
+  nome inteiro e a indentação pela escala; ui_hierarquia_40dp + M-UIc.
   **D (vc 114)**: O VIEWPORT — a coluna das 4 FERRAMENTAS (o ativo É a
-  brasa), o Íman e a MÃO em CHIPS sob o rail, os divisores e a
-  persistência confirmados; ui_divisores_persistencia + M-UId.
-  **E (vc 115)**: O INSPECTOR — o cabeçalho do TIC (o NOME em brasa + o
-  TIPO por baixo; 44dp), a BARRINHA do eixo (as letras morreram), o
-  vazio com o «+ criar TIC»; ui_inspector_cabecalho + M-UIe.
-  **F (vc 116)**: A BARRA FINA + O PAINEL ENCAIXADO — o «Painéis ▾»
-  (contorno brasa aberto) + o estado «60 FPS · 6 TICs» (o bl saiu), as 4
-  TABS na FILA 40dp (o viewport SOBE), a ÚLTIMA aba lembrada, a
-  Animação com a timeline cabendo (clipada) e o PONTO VERMELHO do
-  erro; ui_paineis_dock + M-UIf; c33 13.7/20.5/31.
+  brasa), o Íman e a MÃO em CHIPS, os divisores e a persistência;
+  ui_divisores_persistencia + M-UId.
+  **E (vc 115)**: O INSPECTOR — o cabeçalho do TIC (o NOME em brasa +
+  o TIPO; 44dp), a BARRINHA do eixo, o vazio com o «+ criar TIC»;
+  ui_inspector_cabecalho + M-UIe.
+  **F (vc 116)**: A BARRA FINA + O PAINEL ENCAIXADO — o «Painéis ▾» +
+  o estado «60 FPS · 6 TICs», as 4 TABS na FILA 40dp (o viewport SOBE),
+  a ÚLTIMA aba lembrada, a timeline cabendo e o PONTO VERMELHO do erro;
+  ui_paineis_dock + M-UIf.
   **G (vc 117)**: AS FOLHAS CONTIDAS — o teto de 85% (kSheetMaxPct), a
   reserva da barra no navegador, o X de fechar no menu (7411);
   ui_sheets_conteudos + M-UIg.
   **H (vc 118)**: O EDITOR DE CÓDIGO — o TIC + os exportáveis, as ABAS
-  (em brasa; teto 6), o undo/redo por evento, a BRASA SÓ nas
-  reservadas, o MONO do 2.º atlas e a banda da linha corrente; AS
-  CAUSAS no §11 (o cap 256→512; o follow só-no-evento); M-UIh.
+  (em brasa; teto 6), o undo/redo por evento, o MONO do 2.º atlas e a
+  banda da linha corrente; AS CAUSAS no §11 (o cap 256→512; o follow
+  só-no-evento); M-UIh.
   **I (vc 119)**: AS ABAS ÁUDIO E UI — o ÁUDIO com o ORÇAMENTO VERTICAL
   (o rótulo CLIPS FIXO fora do scroll, a waveform FIXA 80dp, o modal de
   apagar 40dp); o UI com o vazio LEGÍVEL + o «+» claro; M-UIi.
@@ -51,15 +50,25 @@ CICLO DIA/NOITE; o RELATORIO-0.12-Y-E-SKY.md);
   card (as letras morreram) e o Importar SECUNDÁRIO neutro (a brasa só
   no «Novo projeto»); M-UIj.
 
-- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A..D, o
-  C-FIX e a E fechadas, vc 121; a F a seguir)** (a cláusula calma: SÓ
-  o prompt; a V.ONI intocada; a história no RELATORIO-0.12-Y-*.md).
+- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A..E, o
+  C-FIX e a F1 fechadas, vc 122)** (a cláusula calma: SÓ o prompt; a
+  V.ONI intocada; a história no RELATORIO-0.12-Y-*.md).
+  **F1 (vc 122)**: o TIC PARTICLEEMITTER (no
+  RELATORIO-0.12-Y-F1-PARTICLES.md) — VERTEX SHADER ANIMATION (GLES 3.0,
+  ZERO compute): o CPU gera UMA VEZ o VBO de seeds (teto 2000; o slider
+  só muda o count) e o VS faz a balística com o tempo local
+  mod(uTime+seed·100, life); UM glDrawArraysInstanced por emissor; o FS
+  lê a textura OU o disco procedural + o fade out; o preset ParticleEmitter
+  (o 9.º do "+"); o Inspector com a secção (máx/vida/tamanhos/hex
+  16-17/gravidade/textura pelo NAVEGADOR); o .goni transporta; a PAUSA
+  congela o g_fxTime; pins ×3 + R-062 + M-Yf1/M-Yf2 AO VIVO (a M-Yf2
+  apanhou um pin AMBÍGUO — apertado, a lição M-UIj).
   **E (vc 121)**: o CICLO DIA/NOITE (no RELATORIO-0.12-Y-E-SKY.md) — a
   grade dos 4 estados NO CPU 1×/frame (o FS consome os uniforms JÁ
   graduados; ESTRELAS num branch uniforme); o sol roda pelo relógio e a
-  DIRECTIONAL sincroniza (setLight); cloudHeight escala o plano;
-  autoCycle avança o relógio (anel 24h); Inspector +4; .goni: tod/
-  cycSpd/cycOn/cloudH; pins ×4 + R-061(5) + M-Ye1/M-Ye2 AO VIVO.
+  DIRECTIONAL sincroniza; cloudHeight escala o plano; autoCycle (anel
+  24h); Inspector +4; .goni: tod/cycSpd/cycOn/cloudH; pins ×4 +
+  R-061(5) + M-Ye1/M-Ye2 AO VIVO.
   **D (vc 110)**: o CÉU PROCEDURAL (no RELATORIO-0.12-Y-SKY.md) — o shader do céu (render/SkyRenderer.{h,cpp} NOVOS, o padrão Pbr.h: o quad fullscreen + o gradiente horizonte→zénite + o sol disco/halo + as nuvens FBM 2D com hash inteiro e O TEMPO no UV; a base da câmara extraída da vista, válida na orbit E no Play), o Environment ganha skyType/cores do céu/sol/direção/cobertura/vento (o clampFields normaliza o sol), o .goni transporta com defaults omitidos, o Inspector ganha o dropdown "céu: cor sólida|procedural" + os 5 campos SÓ no procedural (ids 5425..5430, os hex 13/14/15, os sliders nuvens/vento), o main desenha o quad ANTES dos modelos com skyType==1 (o 0 = o clear de sempre byte a byte) e o relógio g_skyTime avança 1× por frame; pins ×2 (env_sky_type · inspector_sky) + R-061 regress_procedural_sky + M-Yd1/2 vermelho→reposto→verde (o achado: o falso verde POR COMENTÁRIO nasceu o test::stripCppComments); test_core 1208 OK (os flakes da sandbox excluídos — o CI é o árbitro).
   **C-FIX (vc 109)**: o TESTE DO DONO (Inspector do WorldEnvironment
   VAZIO + modelo BRANCO) — a secção Environment NO Inspector (céu hex ·
@@ -77,41 +86,30 @@ CICLO DIA/NOITE; o RELATORIO-0.12-Y-E-SKY.md);
   ZONA SEGURA, os 15 PNGs (5 densidades × 3) + o fundo #0A0A0C (A ORDEM
   DO DONO); icon_ia_mipmaps + 2 recalibrações com nota + M-Yb1.
   **A (vc 106)**: o PAN da câmara — a 6.ª FERRAMENTA no rail (o glifo
-  Hand, id 33, a legenda «Pan»), o Camera::pan pela FONTE ÚNICA pura
-  (camWorldPerPixel/camRightVec/camUpVec; o target no plano da câmara,
-  agarra a cena), o modo Pan (1 dedo arrasta SEM orbitar) e o pan de 2
-  DEDOS LIVRE (o midpoint em qualquer modo, o pinch intacto, o 1.º frame
-  só ancora); pins ×5 (test_012y.cpp) + R-059 + M-Ya1/2
-  vermelho→reposto→verde; os achados fora da lista (o kCheck do glifo ✓
-  com um traço morto) documentados. O §0.2 VERDE com evidência (vc 105 ·
-  CI success do d9b62a1) e o INCIDENTE do ambiente (o clone herdado
+  Hand, id 33), o Camera::pan pela FONTE ÚNICA pura, o modo Pan (1 dedo
+  SEM orbitar) e o pan de 2 DEDOS LIVRE (o pinch intacto); pins ×5 +
+  R-059 + M-Ya1/2 vermelho→reposto→verde. O §0.2 VERDE com evidência
+  (vc 105 · CI do d9b62a1) e o INCIDENTE do ambiente (o clone herdado
   desatualizado; o fetch/reset sincronizou — zero trabalho perdido).
 - **Campanha 0.12-QoL (UI POLISH + NAVEGADOR + AUTO-SAVE) — FECHADA
-  (A..D, vc 102–105)** (a cláusula calma: refinamento de UI 2.5D e
-  persistência, ZERO lógica de motor; a história vive no
-  RELATORIO-0.12-QoL.md: A a limpeza visual, B o navegador compacto,
-  C o viewport limpo, D o auto-save — pins ×13 + M-QoLa1/x2..QoLd1 +
-  R-056/R-057/R-058).
+  (A..D, vc 102–105)** (a história + os não-feitos no
+  RELATORIO-0.12-QoL.md; pins ×13 + R-056/057/058).
 - **Campanha 0.12-X (CÂMARA DE TERCEIRA PESSOA) — FECHADA (3.9x, vc
-  101)** (o camrig + camdrag + limit no REGISTO como Contínuos; o
-  yaw/pitch no TykerState; o Host::lookDelta com o consumo a ZERAR; o
-  conflito camrig↔follow/look no compilador com o par do Substituir;
-  pins ×14 + R-055 + M-3.9x1/x2; a história vive no
-  RELATORIO-0.12-X-ABERTURA.md e no RELATORIO-0.12-X-CAMRIG.md).
+  101)** (o camrig/camdrag/limit como Contínuos, o Host::lookDelta a
+  ZERAR, o conflito camrig↔follow no compilador; pins ×14 + R-055; no
+  RELATORIO-0.12-X-CAMRIG.md).
 - **Campanha 0.12-U (V.ONI BLOCO A) — FECHADA (3.9a..3.9c + o FECHO, vc 98–100)** (as 7 features no registo, 64 entradas; pins ×37 + R-052..R-054; o platformer do juiz VERDE; nos RELATORIO-0.12-U-*.md).
 - **Campanha 0.12-E (EMERGÊNCIA + REDESIGN 2.5D) — FECHADA (E-1..E-3, vc 95–97)** (o SDF 3D abortado; E-1 o desenho simples, E-2 a paleta no Theme.h — superada pela FASE UI A —, E-3 os efeitos 2.5D; no RELATORIO-0.12-E.md).
 - **Campanha 0.12-D (identidade visual) — PARCIALMENTE ABORTADA (a 0.12-E)**: o D-4 (o LOGO) sobrevive; o D-1/D-2/D-3 DORMENTES; D-5..D-8 CANCELADOS (no RELATORIO-0.12-D.md).
-- **Campanha 0.12-C (layout, organização e consistência) — FECHADA
-  (C-1..C-4, vc 87–90)** (os DETALHES no RELATORIO-0.12-C.md): C-1 as
-  proporções (a hierarquia 20%, o viewport ≥60%), C-2 os menus e a
-  barra de topo, C-3 a tipografia/idioma/superfícies, C-4 o seletor +
-  os vazios com AÇÃO + a REPARAÇÃO da árvore (614 de volta).
+- **Campanha 0.12-C (layout) — FECHADA (C-1..C-4, vc 87–90)** (os
+  DETALHES no RELATORIO-0.12-C.md: as proporções, os menus, a
+  tipografia e o seletor com os vazios com AÇÃO).
 - **Campanha 0.12-B (arquitetura da UI) — FECHADA (B-1..B-4, vc 83–86)**
-  (os DETALHES vivem no RELATORIO-0.12-B.md): B-1 a árvore de UI (pins
-  ×9, R-050), B-2 o Inspector de UI (pins ×5), B-3 o canvas (pins ×3),
-  B-4 as ações de cena 2-tap (pins ×4, R-051).
-- **Campanha 0.12-A (bugs P0) — FECHADA (vc 82)** (os DETALHES vivem no
-  RELATORIO-0.12-A.md + no INVEST-RAM): A-1 as rows LOD JÁ EXISTIAM,A-2 o refreshCatalog no arranque, A-3 o scissor3dRect + o tooltip,A-4 o veredito RAM (a cache de blocos a ciclizar).- **Campanha 0.11-Y (identidade visual) — FECHADA** (o fecho é o commit32a6785: os 13 PNGs + o pin y_fecho; a FASE 31 fica no replay).- **0.11-CTX — FECHADA** com CI verde (os detalhes no §2 e no relatório).- **0.11-W (Render Systems) com CI verde** — falta o PIN do dono no C33 real; o fecho (BLOCO B) só por ordem do dono.
+  (a árvore de UI, o Inspector de UI, o canvas e as ações 2-tap; os
+  DETALHES no RELATORIO-0.12-B.md).
+- **Campanha 0.12-A (bugs P0) — FECHADA (vc 82)** (os DETALHES no
+  RELATORIO-0.12-A.md: as rows LOD, o refreshCatalog, o tooltip e o
+  veredito RAM).- **Campanha 0.11-Y (identidade visual) — FECHADA** (o fecho é o commit32a6785: os 13 PNGs + o pin y_fecho; a FASE 31 fica no replay).- **0.11-CTX — FECHADA** com CI verde (os detalhes no §2 e no relatório).- **0.11-W (Render Systems) com CI verde** — falta o PIN do dono no C33 real; o fecho (BLOCO B) só por ordem do dono.
 
 ## §2 O que está FEITO
 

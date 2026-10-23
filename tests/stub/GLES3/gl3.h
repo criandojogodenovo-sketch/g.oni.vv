@@ -98,6 +98,11 @@ struct Stats {
     // o bloco "Instances" (o binding 1) e o upload do UBO de 4 KB
     int drawElementsInstancedCalls = 0;
     int lastInstanceCount = 0;
+    // 0.12-Y-F1: as partículas — o draw ARRAYS instanciado (o emissor é
+    // UM glDrawArraysInstanced por frame) + o divisor do atributo seeds
+    int drawArraysInstancedCalls = 0;
+    int lastAttribDivisorIndex = -1;
+    int lastAttribDivisorValue = -1;
     int bindBufferBaseInstCalls = 0;      // glBindBufferBase index 1
     int uniformBlockBindingInstCalls = 0; // glUniformBlockBinding 1
     int instanceUploadCalls = 0;          // glBufferSubData de 4096 B
@@ -452,6 +457,27 @@ inline void glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum,
     if (glstub::fb::enabled) {
         glstub::fb::drawElements(mode, count, instanceCount);
     }
+}
+
+// 0.12-Y-F1: o GLES 3.0 core — o draw ARRAYS instanciado (o quad das
+// partículas: 4 vértices × N instâncias num ÚNICO draw call). O fb corre
+// o arrays de sempre (a instância NÃO multiplica o fb — o pin aferra os
+// STATS do call, não os vértices do fb).
+inline void glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count,
+                                  GLsizei instanceCount) {
+    ++glstub::stats.drawArraysInstancedCalls;
+    glstub::stats.lastInstanceCount = (int)instanceCount;
+    if (glstub::fb::enabled) {
+        glstub::fb::drawArrays(mode, first, count);
+    }
+}
+
+// 0.12-Y-F1: o GLES 3.0 core — o divisor por atributo (o VBO dos seeds
+// avança 1 por INSTÂNCIA; os cantos do quad avançam por vértice). O stub
+// só REGISTA (o fb não simula a varredura por instância).
+inline void glVertexAttribDivisor(GLuint index, GLuint divisor) {
+    glstub::stats.lastAttribDivisorIndex = (int)index;
+    glstub::stats.lastAttribDivisorValue = (int)divisor;
 }
 
 // 0.7.8: os no-ops passam a GRAVAR o estado (inócuo p/ os testes antigos —

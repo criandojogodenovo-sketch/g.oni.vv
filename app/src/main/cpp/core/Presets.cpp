@@ -1,6 +1,7 @@
 #include "core/Presets.h"
 #include "components/AudioPlayer.h"
 #include "components/Environment.h"
+#include "components/ParticleEmitter.h"
 #include "components/BodyComp.h"
 #include "components/InputMap.h"
 #include "components/MeshRenderer.h"
@@ -21,6 +22,8 @@ const char* presetName(PresetKind kind) {
         case PresetKind::Audio:           return "Audio";  // 0.8.11
         case PresetKind::WorldEnvironment:
             return "WorldEnvironment";   // 0.12-Y (3.Y-C)
+        case PresetKind::ParticleEmitter:
+            return "ParticleEmitter";    // 0.12-Y-F1
         default:                          return "Tic";
     }
 }
@@ -83,6 +86,14 @@ Handle createTicFromPreset(Scene& scene, PresetKind kind,
         tr->pos = Vec3{0.0f, 0.0f, 0.0f};
         tr->updateWorld();
         tic->addComponent<Environment>();
+        return h;
+    }
+
+    // 0.12-Y-F1: o preset PARTICLEEMITTER é ESTRUTURA — Transform +
+    // ParticleEmitter (o jorro de fábrica: a física vive NO VERTEX SHADER;
+    // SEM mesh, SEM física de corpos). Assenta no grid como os objetos.
+    if (kind == PresetKind::ParticleEmitter) {
+        tic->addComponent<ParticleEmitter>();
         return h;
     }
 

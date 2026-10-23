@@ -837,7 +837,7 @@ TEST(wiring011_preset_audio_estrutura) {
     EXPECT(t->getComponent<MeshRenderer>() == nullptr);
     EXPECT(t->getComponent<BodyComp>() == nullptr);
     EXPECT(std::string(presetName(PresetKind::Audio)) == "Audio");
-    EXPECT(static_cast<u32>(PresetKind::Count) == 7);
+    EXPECT(static_cast<u32>(PresetKind::Count) == 8);   // 0.12-Y-F1: +ParticleEmitter
 
     // o REGISTRO cria por nome (o caminho do "+" e do serializer)
     Scene s2;
@@ -996,7 +996,7 @@ TEST(wiring011_plus_menu_3d_tem_audio) {
     editor::EditorState st;
     st.plusMenu = true;
     const f32 w = editor::kMenuW;
-    const f32 h = editor::kHeaderH + 8.0f * 48.0f + editor::kPad;   // PASSO 1
+    const f32 h = editor::kHeaderH + 9.0f * 48.0f + editor::kPad;   // PASSO 1 (0.12-Y-F1: 9 itens)
     const f32 x = (kSW - w) * 0.5f;
     const f32 y = (kSH - h) * 0.5f;
     // o 7º item (Audio) → choice 7 (o 8.º WorldEnvironment entrou na 0.12-Y)

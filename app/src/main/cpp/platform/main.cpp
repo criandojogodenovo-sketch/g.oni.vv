@@ -80,6 +80,8 @@
 #include "render/Primitives.h"   // 0.8.0 (F7): primitivas procedurais
 #include "render/Renderer.h"
 #include "render/SkyRenderer.h"   // 0.12-Y (3.Y-D): o céu procedural
+#include "render/ParticleRenderer.h"  // 0.12-Y-F1: as partículas GPU
+#include "render/ParticleShader.h"   // 0.12-Y-F1: as puras fx:: (o M-Yf1)
 #include "render/ThumbPng.h"    // 0.9.0: miniatura do projeto (thumb.png)
 #include "core/SceneBounds.h"   // 0.8.9: AABB da cena → far dinâmico editor+Play
 #include "core/UndoStack.h"    // 0.9.0: undo/redo por snapshot
@@ -123,6 +125,13 @@ Grid   g_grid;                // grid de chão: quad 4 vértices + shader (F3.1;
 // congela o céu; a mesma honra do sdf::g_time).
 SkyRenderer g_sky;
 f32         g_skyTime = 0.0f;
+
+// 0.12-Y-F1: AS PARTÍCULAS GPU — um ParticleRenderer para a cena (o MESMO
+// programa para todos os emissores; o buffer de seeds nasce UMA VEZ).
+// g_fxTime é o relógio das PARTÍCULAS (frame real — a pausa congela, a
+// MESMA honra do g_skyTime/sdf::g_time).
+ParticleRenderer g_particles;
+f32              g_fxTime = 0.0f;
 
 // ---- F3: editor ------------------------------------------------------------
 editor::EditorState g_editor;        // seleção + overlays
@@ -1588,12 +1597,21 @@ struct ApplyAskState {
 // ao TIC?» — a intenção É a aplicação; o .goni transporta pelo dump).
 bool g_hdriPickPending = false;
 
+// 0.12-Y-F1 — A INTENÇÃO TEXTURA DA PARTÍCULA: o botão "textura:" do
+// ParticleEmitter arma-a (via EditorState::partTexPick); o pick do .png
+// escreve DIRETO o texturePath do componente (o .goni transporta; o
+// renderer tenta o load LAZY no frame seguinte — a falha cai no sprite
+// procedural com LOG 1×).
+bool g_partTexPickPending = false;
+
 // abre/re-carrega uma pasta do navegador
 void browserOpen(const std::string& path) {
     // 0.12-Y-fix: QUALQUER abertura nova mata a intenção HDRI antiga (o
     // browser aberto por outra via NUNCA sequestra o 1.º pick; a intenção
-    // HDRI re-arma DEPOIS do browserOpen)
+    // HDRI re-arma DEPOIS do browserOpen). 0.12-Y-F1: a intenção da
+    // TEXTURA DA PARTÍCULA vive sob a MESMA regra.
     g_hdriPickPending = false;
+    g_partTexPickPending = false;
     g_browser.cwd = path;
     g_browser.failed = !fileapi::listDirEntries(path, g_browser.entries);
     g_browser.open = true;
@@ -3571,6 +3589,102 @@ bool browserImportHdri(const fileapi::DirEntry& e) {
     return true;
 }
 
+// 0.12-Y-F1 — o IMPORT da TEXTURA DA PARTÍCULA (o irmão do
+// browserImportHdri): o .png escolhido copia-se para textures/ e o
+// texturePath do ParticleEmitter selecionado fica com O CAMINHO DO
+// PROJETO (o load é LAZY no renderer — a falha cai no sprite procedural)
+bool browserImportParticleTex(const fileapi::DirEntry& e) {
+    if (!g_storage || e.isDir) {
+        return true;
+    }
+    if (!fileapi::isFile(e.path)) {
+        char msg[128];
+        std::snprintf(msg, sizeof(msg),
+                      "ficheiro não encontrado: %s (a lista atualizou)",
+                      e.name.c_str());
+        showToast(msg);
+        elog::warn("particle: textura '%s' desapareceu (lista "
+                   "desatualizada) — browser re-listado",
+                   e.path.c_str());
+        g_browser.failed =
+            !fileapi::listDirEntries(g_browser.cwd, g_browser.entries);
+        return false;
+    }
+    std::string ext;
+    {
+        const size_t dot = e.name.rfind('.');
+        if (dot != std::string::npos && dot + 1 < e.name.size()) {
+            ext = e.name.substr(dot + 1);
+            for (char& c : ext) {
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+        }
+    }
+    Tic* tsel = g_scene.get(g_editor.selected);
+    ParticleEmitter* pe =
+        tsel ? tsel->getComponent<ParticleEmitter>() : nullptr;
+    if (!pe) {
+        showToast("seleciona um TIC ParticleEmitter");
+        elog::warn("particle: textura '%s' sem TIC ParticleEmitter "
+                   "selecionado — pick ignorado",
+                   e.path.c_str());
+        return true;
+    }
+    if (ext != "png") {
+        char msg[128];
+        std::snprintf(msg, sizeof(msg),
+                      "textura: .%s fora do escopo — usa PNG",
+                      ext.empty() ? "(sem extensão)" : ext.c_str());
+        showToast(msg);
+        elog::warn("particle: textura '%s' recusada (extensão .%s — o "
+                   "decoder da casa é PNG)",
+                   e.path.c_str(), ext.c_str());
+        return true;
+    }
+    std::vector<u8> bytes;
+    if (!fileapi::readAll(e.path, bytes) || bytes.empty()) {
+        showToast("leitura falhou (causa no engine.log)");
+        elog::error("particle: leitura da textura '%s' FALHOU",
+                    e.path.c_str());
+        return true;
+    }
+    // valida ANTES de escrever (o MESMO gate do HDRI: um PNG ilegível
+    // nunca entra no projeto)
+    RawImage probe;
+    std::string perr;
+    if (!loadPng(bytes.data(), bytes.size(), probe, perr)) {
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "PNG inválido: %.40s", perr.c_str());
+        showToast(msg);
+        elog::error("particle: textura '%s' inválida — %s", e.path.c_str(),
+                    perr.c_str());
+        return true;
+    }
+    // nome sanitizado + colisão (particle_<stem>.png; existe → -2, -3)
+    const std::string stem = convert::sanitizeName(
+        e.name.substr(0, e.name.size() - ext.size() - 1));
+    std::string rel = "textures/particle_" + stem + ".png";
+    for (int tryN = 2; g_storage->exists(rel) && tryN < 100; ++tryN) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "-%d", tryN);
+        rel = "textures/particle_" + stem + buf + ".png";
+    }
+    if (!g_storage->makeDirs("textures") ||
+        !g_storage->writeBytes(rel, bytes.data(), bytes.size())) {
+        showToast("gravar textura falhou (engine.log)");
+        elog::error("particle: writeBytes '%s' FALHOU", rel.c_str());
+        return true;
+    }
+    pe->texturePath = rel;
+    refreshCatalog();   // o PNG entra no catálogo (o seletor vê)
+    char msg[96];
+    std::snprintf(msg, sizeof(msg), "textura aplicada: %.48s", rel.c_str());
+    showToast(msg);
+    elog::info("particle: textura '%s' → %s (TIC '%s')", e.path.c_str(),
+               rel.c_str(), tsel->name.c_str());
+    return true;
+}
+
 bool browserImportFile(const fileapi::DirEntry& e) {
     if (!g_storage || e.isDir) {
         return true;
@@ -5307,6 +5421,9 @@ void onAppCmd(android_app* app, i32 cmd) {
                 if (!g_sky.init()) {
                     elog::error("[boot 4/6] renderer FALHOU no passo: céu procedural");
                 }
+                if (!g_particles.init()) {
+                    elog::error("[boot 4/6] renderer FALHOU no passo: partículas GPU");
+                }
             }
             if (!g_renderer.init()) {
                 elog::error("[boot 4/6] renderer FALHOU (shaders/materiais)");
@@ -6073,6 +6190,66 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
         g_blockFrame.drawnVerts += ds.vertices;
         st = st + ds;
     }
+
+    // ---- 0.12-Y-F1: o PASSE das PARTÍCULAS (transparentes — DEPOIS dos
+    // opacos; depth test ON, depth write OFF). O uTime é o g_fxTime (o
+    // relógio do frame real: a pausa congela — a mesma honra do céu) e a
+    // base da câmara é a MESMA extração do céu (sky::viewBasis).
+    if (g_particles.ok()) {
+        const auto& pes = comps.particleEmitters();
+        for (u32 i = 0; i < pes.size(); ++i) {
+            const Tic* pt = g_scene.get(pes.owner(i));
+            if (!pt || !pt->active || !pes.at(i).active) {
+                continue;   // o MESMO invariante dos outros componentes
+            }
+            const Transform3D* tr = pt->getComponent<Transform3D>();
+            if (!tr) {
+                continue;   // sem Transform não há origem (o preset SEMPRE
+                            // traz um — o .goni à mão pode não ter)
+            }
+            ParticleRenderer::Params pp;
+            pp.vp = vp.m;
+            {
+                // a base da câmara pela FONTE ÚNICA (o Vec3 da casa; o
+                // Params usa f32[3] — a cópia é a ponte honesta)
+                Vec3 rightV, upV, fwdV;
+                sky::viewBasis(view, rightV, upV, fwdV);
+                pp.right[0] = rightV.x;
+                pp.right[1] = rightV.y;
+                pp.right[2] = rightV.z;
+                pp.up[0] = upV.x;
+                pp.up[1] = upV.y;
+                pp.up[2] = upV.z;
+            }
+            pp.pos[0] = tr->world.m[12];   // a coluna da TRANSLAÇÃO (a
+            pp.pos[1] = tr->world.m[13];   // mesma leitura do impostor)
+            pp.pos[2] = tr->world.m[14];
+            pp.time = g_fxTime;
+            const ParticleEmitter& pe = pes.at(i);
+            pp.lifetime = pe.lifetime;
+            pp.vel[0] = pe.velocity[0];
+            pp.vel[1] = pe.velocity[1];
+            pp.vel[2] = pe.velocity[2];
+            pp.grav[0] = pe.gravity[0];
+            pp.grav[1] = pe.gravity[1];
+            pp.grav[2] = pe.gravity[2];
+            pp.startSize = pe.startSize;
+            pp.endSize = pe.endSize;
+            for (int c = 0; c < 4; ++c) {
+                pp.startCol[c] = pe.startColor[c];
+                pp.endCol[c] = pe.endColor[c];
+            }
+            pp.maxParticles = pe.maxParticles;
+            // a textura LAZY (o cache pelo path vive no renderer; o path
+            // vazio = o sprite procedural — uHasTex 0)
+            if (!pe.texturePath.empty() && g_storage) {
+                g_particles.setTexture(g_storage.get(), pe.texturePath);
+                pp.hasTex = true;
+            }
+            const DrawStats ds = g_particles.draw(pp);
+            st = st + ds;
+        }
+    }
     return st;
 }
 
@@ -6814,6 +6991,9 @@ void frame() {
     // congela o céu — a mesma honra do sdf::g_time; 1× por frame, nunca por
     // passo fixo — o céu é render, não lógica)
     g_skyTime += g_frameDt;
+    // 0.12-Y-F1: o relógio das PARTÍCULAS (o MESMO contrato do céu: o
+    // frame real avança, a pausa congela — render, não lógica)
+    g_fxTime += g_frameDt;
     // 0.12-Y-E: o AUTO CICLE — o relógio do DIA avança pelo dayCycleSpeed
     // (1.0 = 1 hora de jogo por segundo real; o 1.º Environment ATIVO manda,
     // o MESMO invariante do clear) — dá a volta em 24h (o clampFields
@@ -7680,6 +7860,16 @@ void frame() {
                     showToast("WorldEnvironment criado (céu/névoa/HDRI)");
                     LOGI("editor: TIC WorldEnvironment criado");
                 }
+            } else if (choice == 9) {
+                // 0.12-Y-F1 — TIC "ParticleEmitter": Transform +
+                // ParticleEmitter (as partículas GPU — a física vive NO
+                // VERTEX SHADER; SEM mesh, SEM física de corpos)
+                const Handle hnew = createTicUndoable(PresetKind::ParticleEmitter);
+                if (hnew.valid()) {
+                    editor::selectTic(g_editor, hnew);
+                    showToast("ParticleEmitter criado (jorro de fábrica)");
+                    LOGI("editor: TIC ParticleEmitter criado");
+                }
             } else {
                 const PresetKind kind = static_cast<PresetKind>(choice - 1);
                 const Handle hnew = createTicUndoable(kind);
@@ -7726,6 +7916,20 @@ void frame() {
             g_editor.fileBrowser = true;
             LOGI("environment: selecionar HDRI — navegador aberto "
                  "(.png equirect)");
+        }
+    }
+
+    // 0.12-Y-F1 — A INTENÇÃO TEXTURA DA PARTÍCULA (o MESMO padrão do
+    // hdri: o flag do Inspector abre o NAVEGADOR e o 1.º pick de .png
+    // escreve o texturePath — o .goni transporta)
+    if (g_editor.partTexPick) {
+        g_editor.partTexPick = false;
+        const Tic* tsel = g_scene.get(g_editor.selected);
+        if (tsel && tsel->getComponent<ParticleEmitter>()) {
+            browserOpen(fileapi::kBrowserRoots[0].path);
+            g_partTexPickPending = true;   // DEPOIS do open (o open limpa)
+            g_editor.fileBrowser = true;
+            LOGI("particle: selecionar textura — navegador aberto (.png)");
         }
     }
 
@@ -8646,6 +8850,15 @@ void frame() {
             if (rowIdx < g_browser.entries.size()) {
                 if (g_browser.entries[rowIdx].isDir) {
                     browserOpen(g_browser.entries[rowIdx].path);
+                } else if (g_partTexPickPending &&
+                           browserImportParticleTex(
+                               g_browser.entries[rowIdx])) {
+                    // 0.12-Y-F1 — A INTENÇÃO ANTES do import de sempre: o
+                    // .png escolhido escreve o texturePath e o browser
+                    // FECHA (o mesmo A4: o consumido fecha)
+                    g_partTexPickPending = false;
+                    g_browser.open = false;
+                    g_editor.fileBrowser = false;
                 } else if (g_hdriPickPending &&
                            browserImportHdri(g_browser.entries[rowIdx])) {
                     // 0.12-Y-fix — A INTENÇÃO HDRI ANTES do import de

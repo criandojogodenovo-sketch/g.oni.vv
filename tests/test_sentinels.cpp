@@ -70,6 +70,9 @@
 #include "render/Renderer.h"
 #include "render/Primitives.h"
 #include "render/SkyRenderer.h"   // 0.12-Y (3.Y-D · R-061): as puras do céu
+#include "render/ParticleRenderer.h"  // 0.12-Y-F1 (R-062): o draw real
+#include "render/ParticleShader.h"    // 0.12-Y-F1 (R-062): as puras fx::
+#include "core/Presets.h"             // 0.12-Y-F1 (R-062): a fábrica
 #include "ui/EditorUi.h"
 #include "platform/EngineLog.h"
 #include "platform/FileApi.h"
@@ -8350,9 +8353,9 @@ TEST(regress_pbr_worldenv) {
         EXPECT_MSG(std::string(presetName(PresetKind::WorldEnvironment)) ==
                        "WorldEnvironment",
                    "R-060: o preset WorldEnvironment saiu do menu (+)");
-        EXPECT_MSG(static_cast<u32>(PresetKind::Count) == 7,
-                   "R-060: a contagem de presets regressou (7 com o "
-                   "WorldEnvironment)");
+        EXPECT_MSG(static_cast<u32>(PresetKind::Count) == 8,
+                   "R-060: a contagem de presets regressou (8 com o "
+                   "ParticleEmitter da 0.12-Y-F1)");
         Scene s;
         const Handle hp =
             createTicFromPreset(s, PresetKind::WorldEnvironment, nullptr,
@@ -8645,5 +8648,98 @@ TEST(regress_procedural_sky) {
         EXPECT_MSG(code.find("if (uStars > 0.001)") != std::string::npos,
                    "R-061: o branch UNIFORME das estrelas morreu (o dia "
                    "paga o campo inteiro)");
+    }
+}
+
+TEST(regress_particles) {
+    // R-062 (0.12-Y-F1) — O SISTEMA DE PARTÍCULAS NÃO MORRE: a fábrica do
+    // jorro (o preset cria o TIC certo), o VS anima (a fórmula do tempo
+    // local + a balística vivem no FONTE sem comentários), o draw é UM
+    // call instanciado com o uTime ÚLTIMO 1f, o .goni transporta o
+    // emissor inteiro e o Inspector escreve nas propriedades (o M-Yf1 —
+    // o tempo ignorado — e o M-Yf2 — o Inspector adornado — morrem AQUI).
+    {
+        // (1) A FÁBRICA: o preset ParticleEmitter = Transform +
+        // ParticleEmitter (SÓ isso)
+        Scene scene;
+        const Handle h = createTicFromPreset(
+            scene, PresetKind::ParticleEmitter, nullptr, nullptr);
+        EXPECT_MSG(h.valid() &&
+                       scene.get(h)->getComponent<Transform3D>() != nullptr &&
+                       scene.get(h)->getComponent<ParticleEmitter>() !=
+                           nullptr &&
+                       scene.get(h)->getComponent<MeshRenderer>() == nullptr,
+                   "R-062: o preset da fábrica morreu (Transform+PE, sem "
+                   "mesh)");
+        // (2) O VS ANIMA — a fórmula EXATA do prompt no fonte (o
+        // stripCppComments mata o falso verde por comentário, a lição da D)
+        std::string src;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/render/ParticleShader.h", src));
+        const std::string code = test::stripCppComments(src);
+        EXPECT_MSG(code.find("float localTime = mod(uTime + (seed * 100.0), "
+                             "uLifetime);") != std::string::npos,
+                   "R-062: o TEMPO LOCAL saiu do VS (a linha do prompt — "
+                   "M-Yf1)");
+        EXPECT_MSG(code.find("(0.5 * uGrav * localTime * localTime)") !=
+                       std::string::npos,
+                   "R-062: a balística saiu do VS");
+        EXPECT_MSG(code.find("float fade = 1.0 - vProgress;") !=
+                       std::string::npos,
+                   "R-062: o FADE OUT da vida saiu do FS");
+        // (3) O DRAW — 1 call × N instâncias, o divisor dos seeds e o
+        // uTime ÚLTIMO 1f (o contrato da casa)
+        glstub::fb::enabled = true;
+        glstub::fb::resetState();
+        glstub::reset();
+        ParticleRenderer pr;
+        EXPECT(pr.init());
+        ParticleRenderer::Params pp;
+        pp.maxParticles = 100;
+        pp.time = 3.0f;
+        const DrawStats st = pr.draw(pp);
+        EXPECT_MSG(st.drawCalls == 1 && st.vertices == 400u &&
+                       glstub::stats.drawArraysInstancedCalls == 1 &&
+                       glstub::stats.lastInstanceCount == 100,
+                   "R-062: o draw deixou de ser 1 glDrawArraysInstanced × "
+                   "100 (calls=%u verts=%u inst=%d)", st.drawCalls,
+                   st.vertices, glstub::stats.lastInstanceCount);
+        EXPECT_MSG(glstub::stats.lastUniform1f == 3.0f,
+                   "R-062: o uTime deixou de ser o ÚLTIMO 1f (%.2f)",
+                   (double)glstub::stats.lastUniform1f);
+        pr.destroy();
+        glstub::fb::enabled = false;
+        glstub::fb::resetState();
+        // (4) O .GONI transporta o emissor INTEIRO (e os defaults ficam de
+        // fora — a fábrica do jorro é silêncio)
+        ParticleEmitter* pe = scene.get(h)->getComponent<ParticleEmitter>();
+        pe->lifetime = 4.0f;
+        pe->maxParticles = 750;
+        pe->clampFields();
+        const std::string dump = SceneSerializer::dump(scene);
+        EXPECT_MSG(dump.find("\"ParticleEmitter\"") != std::string::npos &&
+                       dump.find("\"maxP\"") != std::string::npos &&
+                       dump.find("\"life\"") != std::string::npos,
+                   "R-062: o .goni PERDEU o emissor");
+        Scene b;
+        SceneSerializer::LoadCtx ctx;
+        ASSERT(SceneSerializer::loadText(b, dump, ctx));
+        const ParticleEmitter* pe2 =
+            b.get(b.find("ParticleEmitter"))->getComponent<ParticleEmitter>();
+        EXPECT_MSG(pe2 != nullptr && pe2->maxParticles == 750 &&
+                       nearEqF(pe2->lifetime, 4.0f, 1e-5f),
+                   "R-062: o emissor não volta do .goni");
+        // (5) O INSPECTOR ESCREVE — o slider da vida toca a propriedade e
+        // o botão da textura arma a intenção (o M-Yf2 morre AQUI)
+        std::string ui;
+        EXPECT(readFileText(REPO_ROOT "/app/src/main/cpp/ui/EditorUi.cpp",
+                            ui));
+        const std::string uiCode = test::stripCppComments(ui);
+        EXPECT_MSG(uiCode.find("peEdit->lifetime, \"%.1fs\"") !=
+                       std::string::npos &&
+                       uiCode.find("st.partTexPick = true;") !=
+                           std::string::npos,
+                   "R-062: o Inspector deixou de escrever no emissor "
+                   "(M-Yf2 — o slider adornado)");
     }
 }

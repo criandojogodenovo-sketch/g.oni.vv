@@ -11,6 +11,7 @@
 #include "components/AnimationPlayer.h"   // 0.8.0: animação (F7)
 #include "components/AudioPlayer.h"      // 0.8.11: áudio
 #include "components/Environment.h"     // 0.12-Y: WorldEnvironment
+#include "components/ParticleEmitter.h"  // 0.12-Y-F1: partículas GPU
 #include "components/SkeletonComp.h"  // 0.8.2: esqueleto (F7)
 #include "core/CameraUtil.h"          // 0.7.7: uma ativa por cena
 #include "core/ComponentStore.h"
@@ -1392,6 +1393,126 @@ void fillEnvironment(Environment* env, const Json& comp) {
     env->clampFields();
 }
 
+// ---- 0.12-Y-F1 — ParticleEmitter: a FÁBRICA do jorro (os defaults
+// omitidos = o .goni antigo carrega byte a byte; o forward-compat da casa)
+void appendComponentJson(Json& arr, const ParticleEmitter* pe) {
+    if (!pe) {
+        return;
+    }
+    Json c = Json::makeObject();
+    c.addMember("type", Json::makeString("ParticleEmitter"));
+    if (pe->maxParticles != ParticleEmitter::kMaxParticlesDefault) {
+        c.addMember("maxP", Json::makeNumber(pe->maxParticles));
+    }
+    if (pe->lifetime != ParticleEmitter::kLifetimeDefault) {
+        c.addMember("life", Json::makeNumber(pe->lifetime));
+    }
+    static constexpr f32 kStartDef[4] = {1.0f, 0.72f, 0.25f, 1.0f};
+    static constexpr f32 kEndDef[4]   = {0.90f, 0.15f, 0.05f, 1.0f};
+    bool sDef = true, eDef = true;
+    for (int i = 0; i < 4; ++i) {
+        sDef = sDef && pe->startColor[i] == kStartDef[i];
+        eDef = eDef && pe->endColor[i] == kEndDef[i];
+    }
+    if (!sDef) {
+        Json col = Json::makeArray();
+        for (int i = 0; i < 4; ++i) {
+            col.addItem(Json::makeNumber(pe->startColor[i]));
+        }
+        c.addMember("colA", std::move(col));
+    }
+    if (!eDef) {
+        Json col = Json::makeArray();
+        for (int i = 0; i < 4; ++i) {
+            col.addItem(Json::makeNumber(pe->endColor[i]));
+        }
+        c.addMember("colB", std::move(col));
+    }
+    if (pe->startSize != ParticleEmitter::kSizeStartDefault) {
+        c.addMember("szA", Json::makeNumber(pe->startSize));
+    }
+    if (pe->endSize != ParticleEmitter::kSizeEndDefault) {
+        c.addMember("szB", Json::makeNumber(pe->endSize));
+    }
+    static constexpr f32 kVelDef[3] = {0.0f, ParticleEmitter::kVelYDefault,
+                                       0.0f};
+    static constexpr f32 kGravDef[3] = {0.0f,
+                                        ParticleEmitter::kGravYDefault,
+                                        0.0f};
+    bool vDef = true, gDef = true;
+    for (int i = 0; i < 3; ++i) {
+        vDef = vDef && pe->velocity[i] == kVelDef[i];
+        gDef = gDef && pe->gravity[i] == kGravDef[i];
+    }
+    if (!vDef) {
+        Json v = Json::makeArray();
+        for (int i = 0; i < 3; ++i) {
+            v.addItem(Json::makeNumber(pe->velocity[i]));
+        }
+        c.addMember("vel", std::move(v));
+    }
+    if (!gDef) {
+        Json g = Json::makeArray();
+        for (int i = 0; i < 3; ++i) {
+            g.addItem(Json::makeNumber(pe->gravity[i]));
+        }
+        c.addMember("grav", std::move(g));
+    }
+    if (!pe->texturePath.empty()) {
+        c.addMember("tex", Json::makeString(pe->texturePath));
+    }
+    arr.addItem(std::move(c));
+}
+
+// a reconstrução (os campos ausentes = a fábrica do jorro)
+void fillParticleEmitter(ParticleEmitter* pe, const Json& comp) {
+    if (const Json* j = comp.find("maxP");
+        j && j->type == Json::Type::Number) {
+        pe->maxParticles = static_cast<i32>(j->number);
+    }
+    if (const Json* j = comp.find("life");
+        j && j->type == Json::Type::Number) {
+        pe->lifetime = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("colA");
+        j && j->type == Json::Type::Array && j->items.size() == 4) {
+        for (int i = 0; i < 4; ++i) {
+            pe->startColor[i] = static_cast<f32>(j->items[i].number);
+        }
+    }
+    if (const Json* j = comp.find("colB");
+        j && j->type == Json::Type::Array && j->items.size() == 4) {
+        for (int i = 0; i < 4; ++i) {
+            pe->endColor[i] = static_cast<f32>(j->items[i].number);
+        }
+    }
+    if (const Json* j = comp.find("szA");
+        j && j->type == Json::Type::Number) {
+        pe->startSize = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("szB");
+        j && j->type == Json::Type::Number) {
+        pe->endSize = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("vel");
+        j && j->type == Json::Type::Array && j->items.size() == 3) {
+        for (int i = 0; i < 3; ++i) {
+            pe->velocity[i] = static_cast<f32>(j->items[i].number);
+        }
+    }
+    if (const Json* j = comp.find("grav");
+        j && j->type == Json::Type::Array && j->items.size() == 3) {
+        for (int i = 0; i < 3; ++i) {
+            pe->gravity[i] = static_cast<f32>(j->items[i].number);
+        }
+    }
+    if (const Json* j = comp.find("tex");
+        j && j->type == Json::Type::String) {
+        pe->texturePath = j->string;
+    }
+    pe->clampFields();
+}
+
 void appendComponentJson(Json& arr, const AnimationPlayer* ap) {
     if (!ap) {
         return;
@@ -1520,6 +1641,7 @@ std::string dump(const Scene& scene) {
         appendComponentJson(comps, cs.skeletons().find(t.handle));      // 0.8.2
         appendComponentJson(comps, cs.audioPlayers().find(t.handle));   // 0.8.11
         appendComponentJson(comps, cs.environments().find(t.handle));   // 0.12-Y
+        appendComponentJson(comps, cs.particleEmitters().find(t.handle));   // 0.12-Y-F1
         // BISECT-2: env dump off
         appendComponentJson(comps, cs.scripts().find(t.handle));       // 0.9.2
         appendComponentJson(comps, cs.controls().find(t.handle));      // 0.12-B
@@ -1712,8 +1834,8 @@ bool loadText(Scene& scene, const std::string& text, const LoadCtx& ctx) {
                 fillAudioPlayer(store.get<AudioPlayer>(h), jc);   // 0.8.11
             } else if (jt2->string == "Environment") {
                 fillEnvironment(store.get<Environment>(h), jc);   // 0.12-Y
-            } else if (jt2->string == "Environment") {
-                fillEnvironment(store.get<Environment>(h), jc);   // 0.12-Y
+            } else if (jt2->string == "ParticleEmitter") {
+                fillParticleEmitter(store.get<ParticleEmitter>(h), jc);   // 0.12-Y-F1
             } else if (jt2->string == "Script") {
                 fillScriptComp(store.get<ScriptComp>(h), jc);   // 0.9.2
             }

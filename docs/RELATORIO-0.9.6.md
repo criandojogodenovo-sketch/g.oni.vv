@@ -745,3 +745,26 @@ AO VIVO (a M-Ye2 herdada aplicada na árvore — a lição do objeto stale
 com testes a provar) → suíte 0 falhas · c33_virtual 1008/0 · docs-lint
 VERDE · **versionCode 121** — o build vigente. O 120 fica INTACTO como
 história. (o relatório próprio: docs/RELATORIO-0.12-Y-E-SKY.md)
+
+### §14-l — 0.12-Y-F1 (o TIC ParticleEmitter) — versionCode 122
+
+**G8** (o par declarado no MESMO commit, a regra do §14): o SISTEMA
+BASE de PARTÍCULAS GPU — VERTEX SHADER ANIMATION (GLES 3.0, ZERO
+compute): o CPU gera UMA VEZ o buffer de seeds (2000 × 4 floats — o
+teto do buffer; o slider só muda o count) e o VS faz a balística p =
+p0 + v·t + ½g·t² com o tempo local mod(uTime + seed·100, lifetime) (as
+sementes desafazem o tempo — ninguém nasce junto); UM
+glDrawArraysInstanced por emissor (o divisor 1 nos seeds); o FS lê a
+textura OU o disco procedural e aplica a cor interpolada com o FADE
+OUT; o jorro de fábrica (sobe +3, cai −4, âmbar→vermelho); o preset
+ParticleEmitter (Transform + PE, SEM mesh/física) no menu "+" (o 9.º);
+o Inspector com a secção "Particle Emitter" (máx./vida/tamanhos/cores
+hex 16/17/gravidade/textura pelo NAVEGADOR — a intenção é o MESMO
+contrato do hdri); o .goni transporta com defaults omitidos; a PAUSA
+congela o g_fxTime (a honra do céu). verificação: pins
+particle_emitter_cria · particle_serializa · particle_inspector + R-062
+regress_particles + M-Yf1/M-Yf2 VERMELHAS AO VIVO (a M-Yf2 apanhou um
+pin AMBÍGUO — apertado para a linha exata, a lição M-UIj) → suíte 0
+falhas · c33_virtual 1008/0 · docs-lint VERDE · **versionCode 122** —
+o build vigente. O 121 fica INTACTO como história. (o relatório
+próprio: docs/RELATORIO-0.12-Y-F1-PARTICLES.md)

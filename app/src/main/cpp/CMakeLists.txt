@@ -191,6 +191,9 @@ add_library(goni_vv SHARED
         render/Grid.cpp
         render/SkyRenderer.h   # 0.12-Y (3.Y-D): o céu procedural (gradiente +
         render/SkyRenderer.cpp #   sol + nuvens FBM 2D animadas — o padrão Pbr.h)
+        render/ParticleShader.h  # 0.12-Y-F1: as puras fx:: + os shaders GLSL
+        render/ParticleRenderer.h  # 0.12-Y-F1: as partículas GPU (o VS anima;
+        render/ParticleRenderer.cpp#   UM draw call instanciado por emissor)
         render/Camera.h
         render/Camera.cpp
         render/DrawStats.h

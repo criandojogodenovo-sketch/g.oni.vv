@@ -32,6 +32,9 @@
 #include "render/Camera.h"
 #include "render/Material.h"       // 0.12-Y-fix: o bind do uBaseColorTex
 #include "render/SkyRenderer.h"    // 3.Y-D: as puras do céu + o quad fullscreen
+#include "render/ParticleShader.h"    // 0.12-Y-F1: as puras fx:: (o M-Yf1)
+#include "render/ParticleRenderer.h"  // 0.12-Y-F1: o draw real no stub
+#include "components/ParticleEmitter.h"  // 0.12-Y-F1: o componente
 #include "render/Texture.h"        // 0.12-Y-fix: a textura do pin do bind
 #include "ui/UiEditor.h"           // 3.Y-D: commitTextInput (os hexes 13/14/15)
 #include "render/QuadBatch.h"
@@ -1794,5 +1797,406 @@ TEST(inspector_daynight) {
                        kInspectorEnvCyc != kInspectorEnvHgt &&
                        kInspectorEnvCycS != kInspectorEnvSky,
                    "inspector_daynight: os ids novos colidem");
+    }
+}
+
+// ---- PIN particle_emitter_cria (0.12-Y-F1) ------------------------------------
+// A ordem do dono: «O CPU apenas gera uma vez um buffer com "seeds" e a
+// posição inicial; o Vertex Shader recebe o uTime e calcula a posição
+// final em tempo real. Zero física no CPU». As PURAS (a FONTE ÚNICA
+// render/ParticleShader.h) + o componente + o preset + o VS (a fórmula
+// EXATA do prompt, SEM comentários) + o draw real no stub (1 call, N
+// instâncias, o uTime ÚLTIMO 1f).
+TEST(particle_emitter_cria) {
+    // (1) O COMPONENTE — a fábrica do jorro (os defaults) + a clamp
+    {
+        ParticleEmitter pe;
+        EXPECT_MSG(pe.maxParticles == 500 && nearEq(pe.lifetime, 2.0f, 1e-6f) &&
+                       pe.active && pe.texturePath.empty() &&
+                       nearEq(pe.startSize, 0.25f, 1e-6f) &&
+                       nearEq(pe.endSize, 0.05f, 1e-6f),
+                   "particle_emitter_cria: os defaults da fábrica (500/2s/"
+                   "sprite procedural)");
+        pe.maxParticles = 99999;
+        pe.lifetime = -1.0f;
+        pe.startSize = 99.0f;
+        pe.gravity[1] = -99.0f;
+        pe.clampFields();
+        EXPECT_MSG(pe.maxParticles == 2000 &&
+                       nearEq(pe.lifetime, 0.1f, 1e-6f) &&
+                       nearEq(pe.startSize, 4.0f, 1e-6f) &&
+                       nearEq(pe.gravity[1], -20.0f, 1e-6f),
+                   "particle_emitter_cria: a clamp (2000/0.1s/4/−20)");
+        EXPECT_MSG(ParticleEmitter::kMaxParticlesMax == 2000 &&
+                       ParticleEmitter::kLifetimeMin == 0.1f,
+                   "particle_emitter_cria: os tetos da casa");
+    }
+    // (2) O PRESET — «ParticleEmitter» cria o TIC com Transform +
+    // ParticleEmitter (SÓ isso — SEM mesh, SEM física)
+    {
+        Scene scene;
+        const Handle h = createTicFromPreset(scene, PresetKind::ParticleEmitter,
+                                             nullptr, nullptr);
+        ASSERT(h.valid());
+        const Tic* t = scene.get(h);
+        EXPECT_MSG(t->name.find("ParticleEmitter") == 0,
+                   "particle_emitter_cria: o TIC nasce com o nome do preset "
+                   "('%s')", t->name.c_str());
+        EXPECT_MSG(t->getComponent<Transform3D>() != nullptr,
+                   "particle_emitter_cria: o preset traz o Transform");
+        const ParticleEmitter* pe = t->getComponent<ParticleEmitter>();
+        EXPECT_MSG(pe != nullptr,
+                   "particle_emitter_cria: o preset traz o ParticleEmitter");
+        EXPECT_MSG(t->getComponent<MeshRenderer>() == nullptr &&
+                       t->getComponent<BodyComp>() == nullptr,
+                   "particle_emitter_cria: o preset NÃO traz mesh nem corpo");
+        EXPECT_MSG(nearEq(pe->velocity[1], 3.0f, 1e-6f) &&
+                       nearEq(pe->gravity[1], -4.0f, 1e-6f),
+                   "particle_emitter_cria: o jorro de fábrica (sobe e cai)");
+        // o nome único: o 2.º nasce .001 (o padrão Godot da casa)
+        const Handle h2 = createTicFromPreset(scene, PresetKind::ParticleEmitter,
+                                              nullptr, nullptr);
+        ASSERT(h2.valid());
+        EXPECT_MSG(scene.get(h2)->name != t->name,
+                   "particle_emitter_cria: o 2.º emissor tem nome único");
+    }
+    // (3) AS SEEDS — determinísticas, na esfera do raio kSpawnRadius, a
+    // semente em [0,1) e o buffer INTEIRO gerado de uma vez
+    {
+        f32 a[4], b[4];
+        fx::seedFor(7u, a);
+        fx::seedFor(7u, b);
+        EXPECT_MSG(a[0] == b[0] && a[3] == b[3],
+                   "particle_emitter_cria: a seed NÃO é determinística");
+        u32 fora = 0;
+        f32 seeds[ParticleEmitter::kMaxParticlesMax * 4];
+        fx::generateSeeds(ParticleEmitter::kMaxParticlesMax, seeds);
+        for (u32 i = 0; i < ParticleEmitter::kMaxParticlesMax; ++i) {
+            const f32* s = seeds + i * 4;
+            const f32 len = std::sqrt(s[0] * s[0] + s[1] * s[1] +
+                                      s[2] * s[2]);
+            if (len > fx::kSpawnRadius + 1e-4f) {
+                ++fora;
+            }
+            if (s[3] < 0.0f || s[3] >= 1.0f) {
+                ++fora;
+            }
+        }
+        EXPECT_MSG(fora == 0,
+                   "particle_emitter_cria: %u seeds fora do contrato "
+                   "(esfera %.2f, semente [0,1))", fora,
+                   (double)fx::kSpawnRadius);
+    }
+    // (4) A MATEMÁTICA — o mod do GLSL (NUNCA negativo), a balística
+    // (p = p0 + v·t + ½g·t²), o progresso e as interpolações (o M-Yf1
+    // vive AQUI: sem o termo do tempo as partículas morrem paradas)
+    {
+        EXPECT_MSG(nearEq(fx::glslMod(-2.0f, 24.0f), 22.0f, 1e-5f),
+                   "particle_emitter_cria: o mod NÃO é o do GLSL (negativo "
+                   "não modula)");
+        EXPECT_MSG(nearEq(fx::localTime(5.0f, 0.0f, 2.0f), 1.0f, 1e-5f),
+                   "particle_emitter_cria: o tempo local (5 mod 2 = 1)");
+        // a semente DESFAZ o tempo: sementes diferentes = fases diferentes
+        // (0.1·100=10 → 10 mod 2 = 0; 0.13·100=13 → 13 mod 2 = 1)
+        EXPECT_MSG(std::fabs(fx::localTime(0.0f, 0.1f, 2.0f) -
+                             fx::localTime(0.0f, 0.13f, 2.0f)) > 1e-3f,
+                   "particle_emitter_cria: as sementes NÃO desafazem o "
+                   "tempo (todas nascem juntas)");
+        const f32 p0[3] = {1.0f, 2.0f, 3.0f};
+        const f32 vel[3] = {0.0f, 3.0f, 0.0f};
+        const f32 grav[3] = {0.0f, -4.0f, 0.0f};
+        f32 p[3];
+        fx::particlePos(p0, vel, grav, 1.0f, p);
+        EXPECT_MSG(nearEq(p[0], 1.0f, 1e-5f) && nearEq(p[1], 3.0f, 1e-5f) &&
+                       nearEq(p[2], 3.0f, 1e-5f),
+                   "particle_emitter_cria: a balística (1+0, 2+3−2, 3+0)");
+        EXPECT_MSG(nearEq(fx::lifeProgress(0.5f, 2.0f), 0.25f, 1e-6f),
+                   "particle_emitter_cria: o progresso da vida");
+        EXPECT_MSG(nearEq(fx::particleSize(0.25f, 0.05f, 0.5f), 0.15f,
+                          1e-6f),
+                   "particle_emitter_cria: o tamanho interpola");
+        const f32 c0[4] = {1, 0, 0, 1};
+        const f32 c1[4] = {0, 0, 1, 0};
+        f32 cc[4];
+        fx::particleColor(c0, c1, 0.5f, cc);
+        EXPECT_MSG(nearEq(cc[0], 0.5f, 1e-6f) && nearEq(cc[2], 0.5f, 1e-6f),
+                   "particle_emitter_cria: a cor interpola");
+        // A PROVA DO M-Yf1: o mesmo tempo local em tempos DIFERENTES move
+        // a partícula (o uTime vivo = a nuvem anda)
+        f32 pa[3], pb[3];
+        fx::particlePos(p0, vel, grav, fx::localTime(1.0f, 0.0f, 20.0f), pa);
+        fx::particlePos(p0, vel, grav, fx::localTime(4.0f, 0.0f, 20.0f), pb);
+        EXPECT_MSG(std::fabs(pb[1] - pa[1]) > 1e-3f,
+                   "particle_emitter_cria: o TEMPO NÃO move a partícula "
+                   "(parada — M-Yf1 vermelho)");
+    }
+    // (5) O VS NO FONTE — a fórmula EXATA do prompt, SEM comentários
+    // (o stripCppComments; o M-Yf1 morre AQUI pela 2.ª vez)
+    {
+        std::string src;
+        ASSERT(readFile(repoRoot() +
+                        "/app/src/main/cpp/render/ParticleShader.h",
+                        src));
+        const std::string code = test::stripCppComments(src);
+        EXPECT_MSG(countSub(code,
+                            "float localTime = mod(uTime + (seed * 100.0), "
+                            "uLifetime);") == 1,
+                   "particle_emitter_cria: a fórmula do TEMPO LOCAL saiu do "
+                   "VS (a linha do prompt)");
+        EXPECT_MSG(countSub(code, "(uVel * localTime)") == 1 &&
+                       countSub(code, "(0.5 * uGrav * localTime * localTime)")
+                           == 1,
+                   "particle_emitter_cria: a BALÍSTICA saiu do VS");
+        EXPECT_MSG(countSub(code,
+                            "float lifeProgress = localTime / uLifetime;")
+                       == 1,
+                   "particle_emitter_cria: o PROGRESSO saiu do VS");
+        EXPECT_MSG(countSub(code, "glDrawArraysInstanced") == 0 &&
+                       countSub(code, "uRight * (aCorner.x * sz)") == 1,
+                   "particle_emitter_cria: o billboard saiu do VS (a base "
+                   "da câmara é a do céu)");
+    }
+    // (6) O DRAW REAL no stub — UM draw call, N instâncias, o divisor do
+    // seeds e o uTime ÚLTIMO 1f (o contrato da casa)
+    {
+        glstub::fb::enabled = true;
+        glstub::fb::resetState();
+        glstub::reset();
+        ParticleRenderer pr;
+        ASSERT(pr.init());
+        EXPECT_MSG(glstub::stats.lastAttribDivisorIndex == 1 &&
+                       glstub::stats.lastAttribDivisorValue == 1,
+                   "particle_emitter_cria: o divisor dos seeds (loc 1, 1 "
+                   "por INSTÂNCIA) não ficou armado");
+        ParticleRenderer::Params pp;
+        pp.maxParticles = 500;
+        pp.time = 7.25f;
+        const DrawStats st = pr.draw(pp);
+        EXPECT_MSG(st.drawCalls == 1 && st.vertices == 2000u,
+                   "particle_emitter_cria: o draw NÃO é 1 call × 2000 "
+                   "vértices (calls=%u verts=%u)", st.drawCalls, st.vertices);
+        EXPECT_MSG(glstub::stats.drawArraysInstancedCalls == 1 &&
+                       glstub::stats.lastInstanceCount == 500,
+                   "particle_emitter_cria: o GLES 3.0 não viu 1 "
+                   "glDrawArraysInstanced com 500 instâncias");
+        EXPECT_MSG(glstub::stats.lastUniform1f == 7.25f,
+                   "particle_emitter_cria: o uTime deixou de ser o ÚLTIMO "
+                   "1f do draw (%.2f — o contrato da casa)",
+                   (double)glstub::stats.lastUniform1f);
+        pr.destroy();
+        glstub::fb::enabled = false;
+        glstub::fb::resetState();
+    }
+}
+
+// ---- PIN particle_serializa (0.12-Y-F1) ---------------------------------------
+// A ordem do dono: «O .goni guarda e carrega as propriedades». O roundtrip
+// + os defaults FORA do dump (a fábrica do jorro é silêncio) + a corrupção
+// clampada.
+TEST(particle_serializa) {
+    // (1) O ROUNDTRIP dos campos (os não-defaults entram)
+    {
+        Scene a;
+        const Handle h = a.create("Jorro");
+        a.get(h)->addComponent<Transform3D>();
+        ParticleEmitter* pe = a.get(h)->addComponent<ParticleEmitter>();
+        pe->maxParticles = 1200;
+        pe->lifetime = 3.5f;
+        pe->startColor[0] = 0.2f;
+        pe->endColor[2] = 0.8f;
+        pe->startSize = 0.5f;
+        pe->endSize = 0.1f;
+        pe->velocity[1] = 6.0f;
+        pe->gravity[1] = -9.0f;
+        pe->texturePath = "textures/particle_smoke.png";
+        pe->clampFields();
+        const std::string dump = SceneSerializer::dump(a);
+        EXPECT_MSG(countSub(dump, "\"ParticleEmitter\"") == 1 &&
+                       countSub(dump, "\"maxP\"") == 1 &&
+                       countSub(dump, "\"life\"") == 1,
+                   "particle_serializa: o .goni NÃO guarda o emissor "
+                   "(tipo/máx/vida)");
+        EXPECT_MSG(countSub(dump, "\"colA\"") == 1 &&
+                       countSub(dump, "\"colB\"") == 1 &&
+                       countSub(dump, "\"szA\"") == 1 &&
+                       countSub(dump, "\"szB\"") == 1,
+                   "particle_serializa: o .goni NÃO guarda as cores/tamanhos");
+        EXPECT_MSG(countSub(dump, "\"vel\"") == 1 &&
+                       countSub(dump, "\"grav\"") == 1,
+                   "particle_serializa: o .goni NÃO guarda vel/grav");
+        EXPECT_MSG(countSub(dump, "\"tex\"") == 1 &&
+                   dump.find("particle_smoke.png") != std::string::npos,
+                   "particle_serializa: o .goni NÃO guarda a textura");
+        Scene b;
+        SceneSerializer::LoadCtx ctx;
+        ASSERT(SceneSerializer::loadText(b, dump, ctx));
+        const Handle hf = b.find("Jorro");
+        ASSERT(hf.valid());
+        const ParticleEmitter* pe2 =
+            b.get(hf)->getComponent<ParticleEmitter>();
+        ASSERT(pe2 != nullptr);
+        EXPECT_MSG(pe2->maxParticles == 1200 &&
+                       nearEq(pe2->lifetime, 3.5f, 1e-5f) &&
+                       nearEq(pe2->startColor[0], 0.2f, 1e-5f) &&
+                       nearEq(pe2->endColor[2], 0.8f, 1e-5f) &&
+                       nearEq(pe2->startSize, 0.5f, 1e-5f) &&
+                       nearEq(pe2->endSize, 0.1f, 1e-5f) &&
+                       nearEq(pe2->velocity[1], 6.0f, 1e-5f) &&
+                       nearEq(pe2->gravity[1], -9.0f, 1e-5f) &&
+                       pe2->texturePath == "textures/particle_smoke.png",
+                   "particle_serializa: o emissor não volta do .goni");
+    }
+    // (2) Os DEFAULTS ficam FORA do dump (a fábrica do jorro é silêncio —
+    // o .goni antigo carrega igual)
+    {
+        Scene c;
+        const Handle hc = c.create("limpo");
+        c.get(hc)->addComponent<Transform3D>();
+        c.get(hc)->addComponent<ParticleEmitter>();
+        const std::string dump2 = SceneSerializer::dump(c);
+        EXPECT_MSG(countSub(dump2, "\"maxP\"") == 0 &&
+                       countSub(dump2, "\"life\"") == 0 &&
+                       countSub(dump2, "\"colA\"") == 0 &&
+                       countSub(dump2, "\"tex\"") == 0,
+                   "particle_serializa: os defaults INVADIRAM o .goni");
+        Scene d;
+        SceneSerializer::LoadCtx ctx2;
+        ASSERT(SceneSerializer::loadText(d, dump2, ctx2));
+        const ParticleEmitter* pe3 =
+            d.get(d.find("limpo"))->getComponent<ParticleEmitter>();
+        ASSERT(pe3 != nullptr);
+        EXPECT_MSG(pe3->maxParticles == 500 &&
+                       nearEq(pe3->lifetime, 2.0f, 1e-6f),
+                   "particle_serializa: os ausentes não caem na fábrica");
+    }
+    // (3) A CORRUPÇÃO clampada (99999 partículas → 2000; vida −1 → 0.1)
+    {
+        Scene a;
+        const Handle h = a.create("corrupto");
+        a.get(h)->addComponent<Transform3D>();
+        ParticleEmitter* pe = a.get(h)->addComponent<ParticleEmitter>();
+        pe->maxParticles = 99999;
+        pe->lifetime = -1.0f;
+        const std::string dump = SceneSerializer::dump(a);
+        Scene b;
+        SceneSerializer::LoadCtx ctx;
+        ASSERT(SceneSerializer::loadText(b, dump, ctx));
+        const ParticleEmitter* pe2 =
+            b.get(b.find("corrupto"))->getComponent<ParticleEmitter>();
+        ASSERT(pe2 != nullptr);
+        EXPECT_MSG(pe2->maxParticles == 2000 &&
+                       nearEq(pe2->lifetime, 0.1f, 1e-5f),
+                   "particle_serializa: a corrupção não clampou (%d/%.2f)",
+                   pe2->maxParticles, (double)pe2->lifetime);
+    }
+}
+
+// ---- PIN particle_inspector (0.12-Y-F1) ---------------------------------------
+// A ordem do dono: «Secção "Particle Emitter" quando o TIC tem o
+// componente; sliders para vida/tamanho/cores/gravidade; um botão
+// "textura" que abre o Navegador». O PLANO: a secção + 8 linhas SÓ com o
+// componente, na ordem, a fórmula em casa e os ids não colidem.
+TEST(particle_inspector) {
+    const TextMetrics tm{};
+    Scene scene;
+    const Handle h = scene.create("jorro");
+    scene.get(h)->addComponent<Transform3D>();
+    scene.get(h)->addComponent<ParticleEmitter>();
+    ASSERT(scene.get(h)->getComponent<ParticleEmitter>() != nullptr);
+
+    // (1) O TIC SEM o componente: NENHUMA linha de partículas
+    {
+        Scene vazio;
+        const Handle hv = vazio.create("v");
+        vazio.get(hv)->addComponent<Transform3D>();
+        InspRow rows[64];
+        const u32 n = inspectorPlan(inspectorProfile(*vazio.get(hv)), tm,
+                                    false, 0, rows);
+        u32 pe = 0;
+        for (u32 i = 0; i < n; ++i) {
+            if (rows[i].id == kInspectorPeMax || rows[i].id == kInspectorPeTex)
+                ++pe;
+        }
+        EXPECT_MSG(pe == 0,
+                   "particle_inspector: SEM o componente a secção ENTROU "
+                   "(%u linhas)", pe);
+    }
+    // (2) COM o componente: a secção + as 8 linhas na ORDEM do dono
+    {
+        const InspProfile prof = inspectorProfile(*scene.get(h));
+        EXPECT_MSG(prof.pe,
+                   "particle_inspector: o perfil não vê o componente");
+        InspRow rows[64];
+        const u32 n = inspectorPlan(prof, tm, false, 0, rows);
+        i32 iSec = -1, iMax = -1, iLife = -1, iSzA = -1, iSzB = -1,
+            iColA = -1, iColB = -1, iGrav = -1, iTex = -1;
+        u32 max = 0, life = 0, tex = 0;
+        for (u32 i = 0; i < n; ++i) {
+            const InspRow& r = rows[i];
+            if (r.id == kInspectorPeMax) { ++max; iMax = (i32)i; }
+            if (r.id == kInspectorPeLife) { ++life; iLife = (i32)i; }
+            if (r.id == kInspectorPeSizeA) iSzA = (i32)i;
+            if (r.id == kInspectorPeSizeB) iSzB = (i32)i;
+            if (r.id == kInspectorPeColA) iColA = (i32)i;
+            if (r.id == kInspectorPeColB) iColB = (i32)i;
+            if (r.id == kInspectorPeGrav) iGrav = (i32)i;
+            if (r.id == kInspectorPeTex) { ++tex; iTex = (i32)i; }
+            if (r.kind == InspRow::Kind::PeSection) iSec = (i32)i;
+        }
+        EXPECT_MSG(max == 1 && life == 1 && tex == 1,
+                   "particle_inspector: as linhas faltam ou duplicam "
+                   "(máx=%u vida=%u tex=%u)", max, life, tex);
+        EXPECT_MSG(iSec >= 0 && iMax > iSec && iLife > iMax && iSzA > iLife &&
+                       iSzB > iSzA && iColA > iSzB && iColB > iColA &&
+                       iGrav > iColB && iTex > iGrav,
+                   "particle_inspector: a ORDEM do dono morreu (sec=%d "
+                   "máx=%d vida=%d szA=%d szB=%d colA=%d colB=%d grav=%d "
+                   "tex=%d)", iSec, iMax, iLife, iSzA, iSzB, iColA, iColB,
+                   iGrav, iTex);
+        EXPECT_MSG(inspectorRowCount(prof, false, 0) == n,
+                   "particle_inspector: a fórmula do rowCount divergiu do "
+                   "plano (%u vs %u)", inspectorRowCount(prof, false, 0), n);
+        // os ids não colidem (a colisão mata o toque)
+        EXPECT_MSG(kInspectorPeMax != kInspectorPeLife &&
+                       kInspectorPeColA != kInspectorPeColB &&
+                       kInspectorPeGrav != kInspectorPeTex,
+                   "particle_inspector: os ids colidem");
+    }
+    // (3) O CONTRATO no fonte — o toggle do hex (16/17) e a intenção do
+    // navegador (o M-Yf2 morre AQUI: o slider que não escreve a
+    // propriedade é um adorno)
+    {
+        std::string ui;
+        ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/EditorUi.cpp",
+                        ui));
+        const std::string code = test::stripCppComments(ui);
+        EXPECT_MSG(countSub(code, "case InspRow::Kind::PeLife:") == 1 &&
+                       countSub(code, "peEdit->lifetime, \"%.1fs\"") == 1,
+                   "particle_inspector: o slider da VIDA deixou de escrever "
+                   "a propriedade (a linha EXATA do sliderRow — M-Yf2 "
+                   "vermelho; a cópia morta não satisfaz)");
+        EXPECT_MSG(countSub(code, "peEdit->clampFields()") >= 1,
+                   "particle_inspector: os sliders deixaram de clampar");
+        EXPECT_MSG(countSub(code, "st.partTexPick = true;") == 1,
+                   "particle_inspector: o botão textura deixou de armar a "
+                   "intenção do navegador");
+        std::string mainSrc;
+        ASSERT(readFile(repoRoot() + "/app/src/main/cpp/platform/main.cpp",
+                        mainSrc));
+        const std::string mainCode = test::stripCppComments(mainSrc);
+        EXPECT_MSG(countSub(mainCode,
+                                "g_partTexPickPending &&") >= 1 &&
+                       countSub(mainCode,
+                                "browserImportParticleTex(") >= 1,
+                   "particle_inspector: o intercept do pick da textura "
+                   "morreu no main");
+        std::string ue;
+        ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/UiEditor.cpp",
+                        ue));
+        const std::string ueCode = test::stripCppComments(ue);
+        EXPECT_MSG(countSub(ueCode, "case 16:") == 1 &&
+                       countSub(ueCode, "case 17:") == 1,
+                   "particle_inspector: os hexes 16/17 morreram (as cores "
+                   "não voltam do teclado)");
     }
 }

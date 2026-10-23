@@ -34,7 +34,10 @@ enum class PresetKind : u32 {
     WorldEnvironment = 6,  // 0.12-Y (3.Y-C): só Transform+Environment — o
                            // céu/névoa/HDRI da cena (o 1.º ATIVO manda;
                            // SEM mesh, SEM física)
-    Count           = 7,
+    ParticleEmitter  = 7,  // 0.12-Y-F1: só Transform+ParticleEmitter — o
+                           // emissor de partículas GPU (a física vive NO
+                           // VERTEX SHADER; SEM mesh, SEM física de corpos)
+    Count           = 8,
 };
 
 // Nome canônico do preset (usado no menu "+" e como nome base do TIC).

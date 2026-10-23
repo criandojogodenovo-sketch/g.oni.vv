@@ -1619,6 +1619,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     AudioPlayer* auEdit = tic->getComponent<AudioPlayer>();
     // 0.12-Y-fix — o Environment do TIC (o Inspector do WorldEnvironment)
     Environment* envEdit = tic->getComponent<Environment>();
+    ParticleEmitter* peEdit = tic->getComponent<ParticleEmitter>();   // 0.12-Y-F1
     char meshLabel[64] = "";
     char texLabel[64] = "";
     // 0.10-M HOTFIX TEXTURAS-VINCULA: os rótulos dos 5 slots (só preenchidos
@@ -1641,6 +1642,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     char envZenHex[12] = "";
     char envSunHex[12] = "";
     char envCycLabel[32] = "";   // 0.12-Y-E: o estado do auto ciclo
+    char peColAHex[12] = "";     // 0.12-Y-F1: o hex da cor de início
+    char peColBHex[12] = "";     // 0.12-Y-F1: o hex da cor de fim
+    char peTexLabel[96] = "";    // 0.12-Y-F1: o rótulo do botão textura
     if (envEdit) {
         if (!envEdit->hdriPath.empty()) {
             std::snprintf(envHdriLabel, sizeof(envHdriLabel), "hdri: %s",
@@ -1661,6 +1665,14 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         // 0.12-Y-E: o rótulo do AUTO CICLE (o MESMO padrão da cam ativa)
         std::snprintf(envCycLabel, sizeof(envCycLabel), "auto ciclo: %s",
                       envEdit->autoCycle ? "ligado" : "desligado");
+    }
+    if (peEdit) {
+        uiHexFormat(peEdit->startColor, peColAHex, sizeof(peColAHex));
+        uiHexFormat(peEdit->endColor, peColBHex, sizeof(peColBHex));
+        std::snprintf(peTexLabel, sizeof(peTexLabel), "textura: %s",
+                      peEdit->texturePath.empty()
+                          ? "procedural"
+                          : peEdit->texturePath.c_str());
     }
     char camProjLabel[48] = "";   // 0.7.7
     char camActiveLabel[48] = "";
@@ -1985,12 +1997,13 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             // bit no EditorState::inspCollapsed (PERSISTE — spec G)
             const u32 bit = r.payload;
             const bool open = !(st.inspCollapsed & bit);
-            static const char* kTitles[9] = {"Transform", "Camera", "Malha",
-                                             "Material", "Física", "Áudio",
-                                             "Animação", "Script",
-                                             "Environment"};
+            static const char* kTitles[10] = {"Transform", "Camera", "Malha",
+                                              "Material", "Física", "Áudio",
+                                              "Animação", "Script",
+                                              "Environment",
+                                              "Particle Emitter"};
             u32 titleIdx = 0;
-            for (u32 b = 0; b < 9; ++b) {
+            for (u32 b = 0; b < 10; ++b) {
                 if (bit == (1u << b)) {
                     titleIdx = b;
                 }
@@ -2796,6 +2809,143 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 }
             }
             break;
+        case InspRow::Kind::PeSection: {
+            // 0.12-Y-F1 — o cabeçalho COLAPSÁVEL da secção (o MESMO
+            // padrão do AuSection: título 14sp + chevron + bit persistente)
+            const u32 bit = r.payload;
+            const bool open = !(st.inspCollapsed & bit);
+            if (ui.widgetActive(r.id)) {
+                ui.panel(x + 4.0f, ry, w - 8.0f, r.h, theme::kTheme.surface2);
+            }
+            const TextMetrics m2 = ui.textMetrics();
+            const f32 base = ry + (r.h - m2.block()) * 0.5f + m2.ascent;
+            ui.label(x + kPad, base, "Particle Emitter", theme::kTheme.text1);
+            icons::drawIcon(ui,
+                            open ? icons::Icon::ChevronDown
+                                 : icons::Icon::ChevronRight,
+                            x + w - kPad - theme::dp(20.0f),
+                            ry + (r.h - theme::dp(20.0f)) * 0.5f,
+                            theme::dp(20.0f), theme::kTheme.text2);
+            ui.panel(x + kPad, ry + r.h - 1.0f, w - 2.0f * kPad, 1.0f,
+                     theme::kTheme.border);
+            break;
+        }
+        case InspRow::Kind::PeMax:
+            // 0.12-Y-F1 — slider MÁX. PARTÍCULAS 1..2000 (o COUNT do
+            // draw; o buffer vive no teto — o slider só muda o count).
+            // O padrão do PrimSeg: o f32 local entra e volta arredondado
+            // (o slider trabalha em f32, o campo é i32)
+            if (peEdit) {
+                f32 mx = static_cast<f32>(peEdit->maxParticles);
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "máx.", 1.0f,
+                              static_cast<f32>(
+                                  ParticleEmitter::kMaxParticlesMax),
+                              mx, "%.0f")) {
+                    peEdit->maxParticles = static_cast<i32>(mx + 0.5f);
+                    peEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::PeLife:
+            // 0.12-Y-F1 — slider VIDA 0.1..20 s
+            if (peEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "vida",
+                              ParticleEmitter::kLifetimeMin,
+                              ParticleEmitter::kLifetimeMax,
+                              peEdit->lifetime, "%.1fs")) {
+                    peEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::PeSizeA:
+            // 0.12-Y-F1 — slider TAM. INÍCIO 0..4
+            if (peEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "tam. início",
+                              ParticleEmitter::kSizeMin,
+                              ParticleEmitter::kSizeMax,
+                              peEdit->startSize, "%.2f")) {
+                    peEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::PeSizeB:
+            // 0.12-Y-F1 — slider TAM. FIM 0..4
+            if (peEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "tam. fim",
+                              ParticleEmitter::kSizeMin,
+                              ParticleEmitter::kSizeMax,
+                              peEdit->endSize, "%.2f")) {
+                    peEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::PeColA: {
+            // 0.12-Y-F1 — "cor início: #RRGGBB" + swatch (o MESMO padrão
+            // do horizonte: tocar abre o teclado hex — propósito 16)
+            if (peEdit) {
+                const f32 swS = 48.0f;
+                const f32 swX = x + w - kPad - swS;
+                const f32 swY = ry + (r.h - swS) * 0.5f;
+                ui.panelRounded(swX, swY, swS, swS, theme::kRadiusField,
+                                peEdit->startColor);
+                ui.frameRounded(swX, swY, swS, swS, 1.0f, theme::kRadiusField,
+                                theme::kTheme.border);
+                char label[44];
+                std::snprintf(label, sizeof(label), "cor início: %s",
+                              peColAHex);
+                const f32 btnW = (swX - 8.0f) - (x + kPad);
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                ui.button(r.id, x + kPad, ry + 2.0f, btnW, r.h - 4.0f, label);
+            }
+            break;
+        }
+        case InspRow::Kind::PeColB: {
+            // 0.12-Y-F1 — "cor fim: #RRGGBB" + swatch (teclado hex 17)
+            if (peEdit) {
+                const f32 swS = 48.0f;
+                const f32 swX = x + w - kPad - swS;
+                const f32 swY = ry + (r.h - swS) * 0.5f;
+                ui.panelRounded(swX, swY, swS, swS, theme::kRadiusField,
+                                peEdit->endColor);
+                ui.frameRounded(swX, swY, swS, swS, 1.0f, theme::kRadiusField,
+                                theme::kTheme.border);
+                char label[44];
+                std::snprintf(label, sizeof(label), "cor fim: %s", peColBHex);
+                const f32 btnW = (swX - 8.0f) - (x + kPad);
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                ui.button(r.id, x + kPad, ry + 2.0f, btnW, r.h - 4.0f, label);
+            }
+            break;
+        }
+        case InspRow::Kind::PeGrav:
+            // 0.12-Y-F1 — slider GRAVIDADE Y -20..20 (o caso real: o fogo
+            // sobe com +, a chuva desce com −; X/Z ficam no .goni)
+            if (peEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "gravidade",
+                              -ParticleEmitter::kGravMax,
+                              ParticleEmitter::kGravMax,
+                              peEdit->gravity[1], "%.1f")) {
+                    peEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::PeTex:
+            // 0.12-Y-F1 — o botão TEXTURA (o NAVEGADOR pela intenção —
+            // o MESMO contrato UI→main do hdri; "" = o sprite procedural)
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      peTexLabel);
+            break;
         case InspRow::Kind::EnvSky: {
             // "céu: #RRGGBB" + swatch VIVO (o MESMO padrão da linha hex do
             // tint: tocar abre o teclado em modo hex — propósito 11)
@@ -2908,7 +3058,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             const bool isSection =
                 r.kind == InspRow::Kind::Section ||
                 r.kind == InspRow::Kind::CamSection ||
-                r.kind == InspRow::Kind::AuSection;
+                r.kind == InspRow::Kind::AuSection ||
+                r.kind == InspRow::Kind::PeSection;   // 0.12-Y-F1
             if (r.kind != InspRow::Kind::AddTc &&
                 r.kind != InspRow::Kind::MeshButton &&
                 r.kind != InspRow::Kind::TexButton &&
@@ -2936,6 +3087,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind != InspRow::Kind::EnvZen &&      // 3.Y-D: hex zénite
                 r.kind != InspRow::Kind::EnvSunC &&     // 3.Y-D: hex sol
                 r.kind != InspRow::Kind::EnvCyc &&      // 0.12-Y-E: auto ciclo
+                r.kind != InspRow::Kind::PeColA &&      // 0.12-Y-F1: hex início
+                r.kind != InspRow::Kind::PeColB &&      // 0.12-Y-F1: hex fim
+                r.kind != InspRow::Kind::PeTex &&       // 0.12-Y-F1: navegador
                 !isSection &&                           // 0.9.0: colapsar
                 r.kind != InspRow::Kind::TransformRow &&// 0.9.0: caixas X/Y/Z + R
                 r.kind != InspRow::Kind::Slider) {      // 0.8.9: zona do VALOR
@@ -3146,6 +3300,29 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 if (Environment* e = tic->getComponent<Environment>()) {
                     e->autoCycle = !e->autoCycle;
                     edited = true;
+                }
+            } else if (r.kind == InspRow::Kind::PeColA) {
+                // 0.12-Y-F1 — teclado hex (propósito 16) para a cor de
+                // INÍCIO (inválido = estado intacto, o contrato do hex)
+                if (ParticleEmitter* e = tic->getComponent<ParticleEmitter>()) {
+                    char cur[12];
+                    uiHexFormat(e->startColor, cur, sizeof(cur));
+                    openTextInput(st, 16, st.selected, -1, cur);
+                }
+            } else if (r.kind == InspRow::Kind::PeColB) {
+                // 0.12-Y-F1 — teclado hex (propósito 17) para a cor de FIM
+                if (ParticleEmitter* e = tic->getComponent<ParticleEmitter>()) {
+                    char cur[12];
+                    uiHexFormat(e->endColor, cur, sizeof(cur));
+                    openTextInput(st, 17, st.selected, -1, cur);
+                }
+            } else if (r.kind == InspRow::Kind::PeTex) {
+                // 0.12-Y-F1 — o NAVEGADOR pela INTENÇÃO (o MESMO contrato
+                // UI→main do hdri: o flag arma e o main abre o browser e
+                // intercepta o 1.º pick de .png)
+                if (ParticleEmitter* e = tic->getComponent<ParticleEmitter>()) {
+                    (void)e;
+                    st.partTexPick = true;
                 }
             } else if (r.kind == InspRow::Kind::EnvHdri) {
                 // 0.12-Y-fix — o NAVEGADOR com a intenção HDRI (o flag é o
@@ -3437,7 +3614,8 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     // no Inspector/seletor — a ESTRUTURA primeiro, o som depois).
     const bool uiMode = st.uiMode;
     // 0.12-Y (3.Y-C): o 8.º preset do 3D é o TIC "WorldEnvironment"
-    const int kItems = uiMode ? 10 : 8;   // 0.7.7: Camera; 0.8.0: Mesh; 0.8.11: Audio; 0.12-Y: WorldEnvironment
+    // 0.12-Y-F1: o 9.º é o TIC "ParticleEmitter" (as partículas GPU)
+    const int kItems = uiMode ? 10 : 9;   // 0.7.7: Camera; 0.8.0: Mesh; 0.8.11: Audio; 0.12-Y: WorldEnvironment; 0.12-Y-F1: Partículas
     // PASSO 1 (0.9.6.14): as linhas do menu são alvos de 40dp (a LEI DE
     // OURO — eram 56 num passo de 64; nada ≥48 no editor)
     const f32 rowH = 40.0f;
@@ -3473,9 +3651,9 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     // nasce A ativa — o main chama setOnlyActiveCamera)
     // 0.8.0 (F7): o 6º é o TIC "Mesh" (esfera procedural, SEM física)
     // 0.8.11: o 7º é o TIC "Audio" (Transform+AudioPlayer, SEM mesh)
-    const char* names[8] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
+    const char* names[9] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
                             "RigidBody3D", "Camera", "Mesh", "Audio",
-                            "WorldEnvironment"};
+                            "WorldEnvironment", "ParticleEmitter"};
     // 0.7.4: + VBox/HBox (containers de layout — filhos automáticos)
     const char* elems[10] = {"Panel", "Label", "Button", "Image",
                              "Menu", "Card", "Article", "Joystick",

@@ -131,6 +131,12 @@ struct EditorState {
     // Vive no estado (o mesmo padrão do pickBlockedHint — afervável).
     bool   hdriPick = false;
 
+    // 0.12-Y-F1 — A INTENÇÃO TEXTURA DA PARTÍCULA: o botão "textura:" do
+    // ParticleEmitter arma ISTO; o main consome (abre o NAVEGADOR com a
+    // intenção e o pick do .png escreve o texturePath do componente — o
+    // MESMO contrato UI→main do hdri).
+    bool   partTexPick = false;
+
     // 0.10-M HOTFIX TEXTURAS-MULTIMAT — O MATERIAL ARMADO da secção
     // Material (0..N-1; 0 = o de sempre). O seletor «material: i/N» (as
     // setas ‹ ›) arma ISTO; as 5 linhas de slot mostram O MATERIAL

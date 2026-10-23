@@ -21,6 +21,7 @@
 #include "components/MeshRenderer.h"
 #include "components/TouchControls.h"
 #include "components/Transform3D.h"
+#include "components/ParticleEmitter.h"   // 0.12-Y-F1: hex das cores
 #include "core/Scene.h"
 #include "platform/InputState.h"
 #include "ui/EditorUi.h"
@@ -3048,6 +3049,40 @@ bool commitTextInput(Scene& scene, EditorState& st) {
             env->sunColor[1] = rgba[1];
             env->sunColor[2] = rgba[2];
             env->clampFields();
+            return true;
+        }
+        case 16: {   // 0.12-Y-F1: cor de INÍCIO (ParticleEmitter) por hex
+            Tic* tic = scene.get(st.textTic);
+            ParticleEmitter* pe =
+                tic ? tic->getComponent<ParticleEmitter>() : nullptr;
+            if (!pe) {
+                return false;
+            }
+            f32 rgba[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+            if (!uiHexParse(st.textBuf, rgba)) {
+                return false;   // inválido: o estado fica como estava
+            }
+            pe->startColor[0] = rgba[0];
+            pe->startColor[1] = rgba[1];
+            pe->startColor[2] = rgba[2];
+            pe->clampFields();
+            return true;
+        }
+        case 17: {   // 0.12-Y-F1: cor de FIM (ParticleEmitter) por hex
+            Tic* tic = scene.get(st.textTic);
+            ParticleEmitter* pe =
+                tic ? tic->getComponent<ParticleEmitter>() : nullptr;
+            if (!pe) {
+                return false;
+            }
+            f32 rgba[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+            if (!uiHexParse(st.textBuf, rgba)) {
+                return false;   // inválido: o estado fica como estava
+            }
+            pe->endColor[0] = rgba[0];
+            pe->endColor[1] = rgba[1];
+            pe->endColor[2] = rgba[2];
+            pe->clampFields();
             return true;
         }
         case 6: {   // 0.8.9 — CAMPO NUMÉRICO SEM TETO do Inspector (Transform3D)

@@ -333,6 +333,9 @@ add_executable(test_core
         # 0.12-Y (3.Y-D): o céu procedural — o test_wiring087 #include
         # platform/main.cpp (o drawTics desenha o quad quando skyType==1)
         ${CORE_DIR}/render/SkyRenderer.cpp
+        # 0.12-Y-F1: as partículas GPU — o MESMO caminho real (o drawTics
+        # desenha os emissores pelo ParticleRenderer; a física no VS)
+        ${CORE_DIR}/render/ParticleRenderer.cpp
         # 0.8.11: ÁUDIO — o misturador/contentor .gi/codecs + o backend
         # COMUM (AudioOut.cpp: probe harness + currentMixFn; as fábricas
         # stub existem SÓ no host — o TU do device não compila aqui) + o
@@ -497,6 +500,7 @@ set(GONI_CORE_SRCS
         ${CORE_DIR}/platform/EglContext.cpp
         ${CORE_DIR}/render/Grid.cpp
         ${CORE_DIR}/render/SkyRenderer.cpp   # 0.12-Y (3.Y-D): o céu procedural
+        ${CORE_DIR}/render/ParticleRenderer.cpp   # 0.12-Y-F1: as partículas
         ${CORE_DIR}/assets/GiFormat.cpp
         ${CORE_DIR}/assets/AudioCodecs.cpp
         ${CORE_DIR}/core/AudioEngine.cpp

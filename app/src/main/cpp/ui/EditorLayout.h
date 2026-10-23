@@ -199,6 +199,15 @@ constexpr u64 kInspectorEnvTod  = 5431;   // slider hora 0..24
 constexpr u64 kInspectorEnvCyc  = 5432;   // botão auto ciclo (ligado|desligado)
 constexpr u64 kInspectorEnvCycS = 5433;   // slider vel. ciclo 0..1
 constexpr u64 kInspectorEnvHgt  = 5434;   // slider altura nuvens 0.25..4
+// 0.12-Y-F1 — PARTÍCULAS (faixa 5440..5447)
+constexpr u64 kInspectorPeMax   = 5440;   // slider máx. partículas 1..2000
+constexpr u64 kInspectorPeLife  = 5441;   // slider vida 0.1..20 s
+constexpr u64 kInspectorPeSizeA = 5442;   // slider tam. início 0..4
+constexpr u64 kInspectorPeSizeB = 5443;   // slider tam. fim 0..4
+constexpr u64 kInspectorPeColA  = 5444;   // "cor início: #RRGGBB" (hex 16)
+constexpr u64 kInspectorPeColB  = 5445;   // "cor fim: #RRGGBB" (hex 17)
+constexpr u64 kInspectorPeGrav  = 5446;   // slider gravidade Y -20..20
+constexpr u64 kInspectorPeTex   = 5447;   // "textura: ..." (o NAVEGADOR)
 // 0.8.0 (F7) — primitiva procedural do MeshRenderer + animação
 constexpr u64 kInspectorPrimSel   = 5003;   // "prim: esfera ▸" (seletor)
 constexpr u64 kInspectorPrimR     = 5600;   // slider raio/size
@@ -284,6 +293,9 @@ struct InspProfile {
     // 0.12-Y-fix: o WorldEnvironment presente (secção Environment com os
     // 5 controlos — céu/hdri/ambiente/névoa/cor da névoa)
     bool env = false;
+    // 0.12-Y-F1: o ParticleEmitter presente (secção com os 8 controlos —
+    // máx/vida/tamanhos/cores hex/gravidade/textura)
+    bool pe = false;
     // 0.12-Y (3.Y-D): o TIPO de céu do Environment (0 = sólida, 1 =
     // procedural — o plano é CONDICIONAL a isto: o M-Yd2 vive aqui)
     u32 envSkyType = 0;
@@ -305,6 +317,7 @@ inline InspProfile inspectorProfile(const Tic& tic) {
     p.au = tic.getComponent<AudioPlayer>() != nullptr;   // 0.8.11
     p.script = tic.getComponent<ScriptComp>() != nullptr;   // 0.9.2
     p.env = tic.getComponent<Environment>() != nullptr;   // 0.12-Y-fix
+    p.pe = tic.getComponent<ParticleEmitter>() != nullptr;   // 0.12-Y-F1
     if (const Environment* envP = tic.getComponent<Environment>()) {
         p.envSkyType = envP->skyType;   // 0.12-Y (3.Y-D): o plano condiciona
     }
@@ -419,6 +432,16 @@ struct InspRow {
         EnvCyc,      // 0.12-Y-E: botão auto ciclo (o toggle da casa)
         EnvCycS,     // 0.12-Y-E: slider vel. ciclo 0..1 (1 = 1h/s)
         EnvHgt,      // 0.12-Y-E: slider altura nuvens 0.25..4
+        // 0.12-Y-F1 — PARTÍCULAS (a secção do ParticleEmitter)
+        PeSection,   // cabeçalho "Particle Emitter" + separador
+        PeMax,       // slider máx. partículas 1..2000 (o COUNT do draw)
+        PeLife,      // slider vida 0.1..20 s
+        PeSizeA,     // slider tam. início 0..4
+        PeSizeB,     // slider tam. fim 0..4
+        PeColA,      // "cor início: #RRGGBB" + swatch (teclado hex 16)
+        PeColB,      // "cor fim: #RRGGBB" + swatch (teclado hex 17)
+        PeGrav,      // slider gravidade Y -20..20 (o caso real: fogo/chuva)
+        PeTex,       // botão "textura: <nome|procedural>" (o NAVEGADOR)
     };
     Kind kind;
     f32  y;     // topo da linha em COORDS DE CONTEÚDO (cumulativo)
@@ -477,6 +500,7 @@ constexpr u32 kInspBitAudio     = 1u << 5;
 constexpr u32 kInspBitAnim      = 1u << 6;
 constexpr u32 kInspBitScript    = 1u << 7;   // 0.9.2: V.ONI
 constexpr u32 kInspBitEnvironment = 1u << 8; // 0.12-Y-fix: WorldEnvironment
+constexpr u32 kInspBitParticles  = 1u << 9; // 0.12-Y-F1: ParticleEmitter
 
 // altura de UMA linha de Transform (PASSO 1: título 12sp + caixas 32dp +
 // folga — a spec: «campos 32dp»; eram caixas de 48). 0.12-QoL A: a folga
@@ -567,6 +591,13 @@ inline u32 inspectorRowCount(const InspProfile& p, bool selectable,
         n += 1;
         if (!(collapsed & kInspBitAudio)) {
             n += 9;
+        }
+    }
+    // ---- PARTÍCULAS (bit9 — 0.12-Y-F1) ----
+    if (p.pe) {
+        n += 1;
+        if (!(collapsed & kInspBitParticles)) {
+            n += 8;
         }
     }
     // ---- ENVIRONMENT (bit8 — 0.12-Y-fix): o WorldEnvironment -------------
@@ -782,6 +813,23 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
             push(InspRow::Kind::EnvAmb, sldH, kInspectorEnvAmb);
             push(InspRow::Kind::EnvFogD, sldH, kInspectorEnvFogD);
             push(InspRow::Kind::EnvFogC, btnH, kInspectorEnvFogC);
+        }
+    }
+    // ---- PARTÍCULAS (0.12-Y-F1) — a secção do ParticleEmitter: máx,
+    // vida, tamanhos, cores hex (16/17), gravidade e a textura pelo
+    // NAVEGADOR (a intenção é o contrato UI→main, o padrão HDRI)
+    if (p.pe) {
+        push(InspRow::Kind::PeSection, secH, kInspSectionBase + 9,
+             kInspBitParticles);
+        if (!(collapsed & kInspBitParticles)) {
+            push(InspRow::Kind::PeMax, sldH, kInspectorPeMax);
+            push(InspRow::Kind::PeLife, sldH, kInspectorPeLife);
+            push(InspRow::Kind::PeSizeA, sldH, kInspectorPeSizeA);
+            push(InspRow::Kind::PeSizeB, sldH, kInspectorPeSizeB);
+            push(InspRow::Kind::PeColA, btnH, kInspectorPeColA);
+            push(InspRow::Kind::PeColB, btnH, kInspectorPeColB);
+            push(InspRow::Kind::PeGrav, sldH, kInspectorPeGrav);
+            push(InspRow::Kind::PeTex, btnH, kInspectorPeTex);
         }
     }
     // ---- SCRIPT V.ONI (0.9.2 §10) — sempre disponível num TIC ----------
