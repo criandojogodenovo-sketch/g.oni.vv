@@ -1,8 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-23 · vc: 119 · Último commit: este (a FASE UI I — as abas
-ÁUDIO e UI: o orçamento vertical do workspace + o estado vazio legível com o «+»
-claro (o plusMenu do C-4); o §12 do RELATORIO-FASE-UI);
+Atualizado: 2026-10-23 · vc: 120 · Último commit: este (a FASE UI J — a
+tela de projetos: o ícone da engine no fallback do card e o Importar
+SECUNDÁRIO neutro; o §13 do RELATORIO-FASE-UI);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -10,11 +10,11 @@ claro (o plusMenu do C-4); o §12 do RELATORIO-FASE-UI);
 
 ## §1 Onde estamos
 
-- **Campanha FASE UI (O REDESIGN VISUAL, envios 1/5..5/5) — EM CURSO
-  (A..I fechadas, vc 119; a J do 5/5 pendente)** (a cláusula calma: SÓ
-  visual, layout e UX — core/V.ONI/importadores/física/.gmesh
-  intocados; um commit por parte, CI verde entre elas; a história no
-  RELATORIO-FASE-UI.md, os não-feitos no §8).
+- **Campanha FASE UI (O REDESIGN VISUAL, envios 1/5..5/5) — A..J
+  FECHADAS no código (vc 120; o CI é o árbitro de cada parte)** (a
+  cláusula calma: SÓ visual, layout e UX — core/V.ONI/importadores/
+  física/.gmesh intocados; um commit por parte, CI verde entre elas; a
+  história no RELATORIO-FASE-UI.md, os não-feitos no §8).
   **A (vc 111)**: O FICHEIRO ÚNICO DE TOKENS com a paleta do dono (os
   hexes EXATOS da ordem: fundo #0B0B0D · painéis #121215 · elementos
   #1B1B20 · linhas #26262C · texto #E8E6E3/#8A8A93 · A BRASA ÚNICA
@@ -48,9 +48,13 @@ claro (o plusMenu do C-4); o §12 do RELATORIO-FASE-UI);
   só-no-evento); ui_codigo_editor + M-UIh; jniClipboardPaste.
   **I (vc 119)**: AS ABAS ÁUDIO E UI — o ÁUDIO com o ORÇAMENTO VERTICAL
   (o rótulo CLIPS FIXO fora do scroll, a waveform FIXA 80dp, as ações
-  numa linha, o modal de apagar com 40dp, a lista a ceder, o guard
-  honesto); o UI com o vazio LEGÍVEL (o drawEmptyState da casa) + o
-  «+» claro de 44dp (o plusMenu do C-4); ui_audio_ui + M-UIi.
+  numa linha, o modal de apagar com 40dp); o UI com o vazio LEGÍVEL
+  (o drawEmptyState da casa) + o «+» claro (o plusMenu do C-4);
+  ui_audio_ui + M-UIi.
+  **J (vc 120)**: A TELA DE PROJETOS — o fallback do card é O ÍCONE DA
+  ENGINE (o BrandThumbView pela ÚNICA função; as letras morreram) e o
+  Importar SECUNDÁRIO neutro (a brasa SÓ no «Novo projeto»);
+  projects_ui_check recalibrado + M-UIj.
 
 - **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A, B, C, o
   C-FIX e o D fechadas, vc 110; o FECHO a seguir)** (a cláusula calma: SÓ o

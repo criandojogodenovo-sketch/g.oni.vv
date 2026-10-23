@@ -709,3 +709,19 @@ caminho do C-4). verificação: test_core 0 falhas (o pin ui_audio_ui) ·
 c33_virtual 1008/0 · docs-lint VERDE · **versionCode 119** — o build
 vigente. O 118 fica INTACTO como história. (o relatório próprio:
 docs/RELATORIO-FASE-UI.md §12)
+
+### §14-j — FASE UI J (a tela de projetos) — versionCode 120
+
+**G8** (o par declarado no MESMO commit, a regra do §14): os cartões
+com O ÍCONE DA ENGINE no fallback (o BrandThumbView desenha o glifo
+pela ÚNICA função UiIcons.drawBrand na cor fraca — AS LETRAS
+GENÉRICAS «TE»/«AS» MORRERAM com o InitialsThumbView; a miniatura da
+cena continua a ser o thumb.png quando existe), o nome, a data e o ⋮
+(confirmados), «Novo projeto» o ÚNICO botão em brasa (fill accent) e
+«Importar projeto» SECUNDÁRIO (contorno neutro border/text1 — a brasa
+fica só no primário), a pesquisa e o ordenar discretos (confirmados),
+a MESMA paleta/tokens do editor (confirmados). verificação: o gate
+projects_ui_check recalibrado (a mutação M-UIj vermelho→verde ao
+vivo) · docs-lint VERDE · **versionCode 120** — o build vigente. O 119
+fica INTACTO como história. (o relatório próprio:
+docs/RELATORIO-FASE-UI.md §13)

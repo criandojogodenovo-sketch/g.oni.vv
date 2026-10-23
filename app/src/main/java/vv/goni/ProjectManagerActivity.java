@@ -45,7 +45,7 @@ import java.util.concurrent.Executors;
  *   │ [logo G+lâmpada 48] G.One VV            (20sp)                │ 72dp
  *   │                      editor de jogos no telemóvel (12sp text2)│
  *   │ [🔍 pesquisar projetos______________] [Ordenar: Última Ed. ▾] │ 48dp
- *   │ [  ＋ Novo projeto  ] [  ⬆ Importar projeto  ]  ← fill accent │ 56dp
+ *   │ [  ＋ Novo projeto  ] [  ⬆ Importar projeto  ]  ← ÚNICO em brasa│ 56dp
  *   │ Meus projetos                                       (12sp)   │
  *   │ ┌───────────────┐  ┌───────────────┐                          │
  *   │ │  16:9 thumb   │  │  16:9 thumb   │  cards r=8dp, bordo      │
@@ -145,7 +145,8 @@ public class ProjectManagerActivity extends Activity {
 
         // FASE 9 (G1-4b): cabeçalho NUMA LINHA — ícone+título à esquerda;
         // pesquisa ao centro (flex); ordenar SÓ ÍCONE (texto no menu);
-        // "Novo projeto" preenchido azul; "Importar projeto" só contorno
+        // FASE UI J: «Novo projeto» é o ÚNICO botão em brasa (fill accent);
+        // «Importar projeto» fica SECUNDÁRIO (contorno neutro)
         root.addView(buildTopBar());
 
         // corpo: grelha + empty-state sobrepostos
@@ -329,8 +330,10 @@ public class ProjectManagerActivity extends Activity {
         np.leftMargin = dp(12);
         bar.addView(novo.view(), np);
 
-        // [Importar projeto] — SÓ CONTORNO (bordo accent 1dp, fundo
-        // transparente, texto/ícone accent — o par do preenchido)
+        // [Importar projeto] — SECUNDÁRIO (a ordem da PARTE J: «Novo
+        // projeto» é o ÚNICO botão em brasa): contorno NEUTRO (bordo border
+        // 1dp, fundo transparente, texto/ícone text1 — o destaque fica
+        // APENAS no primário, a regra da casa)
         Button24 imp = new Button24(this, "Importar projeto",
                 UiIcons.UPLOAD, 0, 0, true);
         LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(
@@ -351,15 +354,19 @@ public class ProjectManagerActivity extends Activity {
             b.setText(label);
             b.setAllCaps(false);
             b.setTextSize(15);
-            b.setTextColor(outline ? ACCENT : ACCENT_INK);
+            // FASE UI J: o contorno é SECUNDÁRIO NEUTRO (bordo border, texto
+            // text1) — a brasa fica SÓ no primário («Novo projeto» é o
+            // ÚNICO botão em brasa); o tinta do fill continua ACCENT_INK
+            b.setTextColor(outline ? TEXT1 : ACCENT_INK);
             b.setPadding(dp2(a, outline ? 10 : 16), 0,
                          dp2(a, outline ? 10 : 16), 0);
             GradientDrawable n = new GradientDrawable();
             if (outline) {
-                // FASE 9 (G1-4b): SÓ CONTORNO — fundo transparente + bordo
-                // accent 1dp (o par do preenchido)
+                // FASE UI J: contorno NEUTRO — fundo transparente + bordo
+                // border 1dp (o secundário discreto; o destaque é do
+                // primário)
                 n.setColor(Color.TRANSPARENT);
-                n.setStroke(dp2(a, 1), ACCENT);
+                n.setStroke(dp2(a, 1), BORDER);
             } else {
                 n.setColor(fill);
             }
@@ -367,7 +374,7 @@ public class ProjectManagerActivity extends Activity {
             GradientDrawable p = new GradientDrawable();
             if (outline) {
                 p.setColor(SURFACE2);
-                p.setStroke(dp2(a, 1), ACCENT);
+                p.setStroke(dp2(a, 1), BORDER);
             } else {
                 p.setColor(fillPress);
             }
@@ -377,7 +384,7 @@ public class ProjectManagerActivity extends Activity {
             st.addState(new int[]{}, n);
             b.setBackground(st);
             b.setCompoundDrawablesWithIntrinsicBounds(
-                    UiIcons.drawable(icon, outline ? ACCENT : ACCENT_INK, 24,
+                    UiIcons.drawable(icon, outline ? TEXT1 : ACCENT_INK, 24,
                                      a.getResources()
                                              .getDisplayMetrics().density),
                     null, null, null);
@@ -670,14 +677,13 @@ public class ProjectManagerActivity extends Activity {
                             ViewGroup.LayoutParams.WRAP_CONTENT,
                             Gravity.CENTER));
                 } else {
-                    // 0.9.6.18 (HOTFIX D7): o DEFAULT é o tile de INICIAIS
-                    // (máx 2) + matiz sóbrio de hash sobre grafite (paleta
-                    // fixa de 6) — o dono: «O ícone da app NUNCA é conteúdo
-                    // de card» (o gone_logo aqui era a galeria de
-                    // placeholders); o card sem thumb.png é DISTINTO dos
-                    // outros pelo hash do nome
-                    thumb.addView(new InitialsThumbView(
-                            ProjectManagerActivity.this, e.name),
+                    // FASE UI J (a ordem do dono): o DEFAULT é O ÍCONE DA
+                    // ENGINE (o BrandThumbView — o glifo pela ÚNICA função,
+                    // na cor fraca) — AS LETRAS GENÉRICAS «TE»/«AS» MORRERAM
+                    // (o InitialsThumbView saiu com a ordem; o thumb.png
+                    // continua a ser a miniatura da cena quando existe)
+                    thumb.addView(new BrandThumbView(
+                            ProjectManagerActivity.this),
                             new FrameLayout.LayoutParams(
                                     ViewGroup.LayoutParams.MATCH_PARENT,
                                     ViewGroup.LayoutParams.MATCH_PARENT));
@@ -765,60 +771,19 @@ public class ProjectManagerActivity extends Activity {
     }
 
     /**
-     * 0.9.6.18 (HOTFIX D7) — o FALLBACK determinístico do card sem
-     * thumb.png: tile de INICIAIS do nome (máx 2) + matiz sóbrio de hash
-     * sobre grafite (paleta FIXA de 6 matizes). NUNCA o ícone da app
-     * (a regra do dono); os cards distintos entre si pelo hash do nome.
-     * 0.9.6.18b — a CLASSE DEIXA DE SER static (a densidade vem da
-     * activity por herança do contexto interno) e SEM membros static no
-     * corpo (o nível de linguagem 1.8 do AGP não os leva em classe
-     * interna); o bordo é STROKE com o dp da casa (o FILL pintava a laje
-     * TODA de BORDER e o setStroke não existe em Paint — era
-     * setStrokeWidth).
+     * FASE UI J (a ordem do dono) — o FALLBACK determinístico do card sem
+     * thumb.png é O ÍCONE DA ENGINE («Cartões com miniatura da cena ou o
+     * ícone da engine — acabar com as letras genéricas "TE"/"AS"»): o
+     * glifo da marca DESENHADO pela ÚNICA função (UiIcons.drawBrand, o
+     * espelho Java da Brand.cpp — a paridade; nunca o PNG do launcher)
+     * sobre o tile da casa (grafite + bordo 1dp), na cor FRACA (o BORDER
+     * — o mesmo G fraco do estado vazio: o tile nunca compete com o nome
+     * do projeto). As iniciais morreram AQUI (o InitialsThumbView saiu
+     * com a ordem; o gate projects_ui_check recalibrado no mesmo commit).
      */
-    private final class InitialsThumbView extends View {
-        // a paleta fixa (6 matizes SÓBRIOS — saturação contida, todos
-        // legíveis sobre o grafite da casa; NUNCA cores vivas de placeholder)
-        private final int[] HUES = {
-                0xFFD94A16,   // a brasa da casa, escurecida (FASE UI)
-                0xFFC4573B,   // terracota
-                0xFF3E8E7E,   // azul-petróleo
-                0xFF5B7FA6,   // azul-ardósia
-                0xFF6E8B3D,   // musgo
-                0xFF8B6FA0,   // malva
-        };
-        private final String initials;
-        private final int hue;
-
-        InitialsThumbView(Activity a, String name) {
+    private final class BrandThumbView extends View {
+        BrandThumbView(Activity a) {
             super(a);
-            this.initials = initialsOf(name);
-            // o matiz: hash POSITIVO do nome sobre a paleta FIXA (o mesmo
-            // nome → sempre o mesmo matiz — determinístico, sem aleatório)
-            this.hue = HUES[Math.abs(name.hashCode()) % HUES.length];
-        }
-
-        /** as iniciais (0.9.6.19 · HOTFIX D18): 2+ palavras → a inicial das
-         *  DUAS primeiras; 1 palavra → a PRIMEIRA + a ÚLTIMA letra
-         *  (projetoyygf → "PF", prooksnsn → "PN" — todas saíam "PR" com a
-         *  regra antiga das duas primeiras letras; o pin: projetos com
-         *  prefixo comum distinguem-se por iniciais ou matiz); 1 letra →
-         *  ela própria; vazio → "·" (o tile nunca fica mudo) */
-        private String initialsOf(String name) {
-            if (name == null || name.trim().isEmpty()) {
-                return "·";
-            }
-            String[] words = name.trim().split("\\s+");
-            if (words.length >= 2) {
-                return (words[0].substring(0, 1)
-                        + words[1].substring(0, 1)).toUpperCase();
-            }
-            String w = words[0];
-            if (w.length() == 1) {
-                return w.toUpperCase();
-            }
-            return (w.substring(0, 1)
-                    + w.substring(w.length() - 1)).toUpperCase();
         }
 
         @Override
@@ -826,23 +791,21 @@ public class ProjectManagerActivity extends Activity {
             super.onDraw(c);
             final android.graphics.Paint p = new android.graphics.Paint(
                     android.graphics.Paint.ANTI_ALIAS_FLAG);
-            // o tile: grafite da casa + bordo 1dp + iniciais BOLD no matiz
+            // o tile: grafite da casa + bordo 1dp
             p.setStyle(android.graphics.Paint.Style.FILL);
-            p.setColor(SURFACE2);   // 0.12-C: o token da casa (era o hex velho)
+            p.setColor(SURFACE2);
             c.drawRect(0, 0, getWidth(), getHeight(), p);
             p.setStyle(android.graphics.Paint.Style.STROKE);
-            final float sw = dp(1);   // o dp da CASA (o dp2 local morreu — duplicava a derivação)
+            final float sw = dp(1);
             p.setStrokeWidth(sw);
-            p.setColor(BORDER);   // o token da casa (AS LINHAS #26262C da FASE UI)
+            p.setColor(BORDER);
             c.drawRect(sw / 2f, sw / 2f, getWidth() - sw / 2f,
                     getHeight() - sw / 2f, p);
-            p.setColor(hue);
-            p.setTextAlign(android.graphics.Paint.Align.CENTER);
-            p.setFakeBoldText(true);
-            p.setTextSize(Math.min(getWidth(), getHeight()) * 0.38f);
-            final float base = getHeight() / 2f
-                    - (p.descent() + p.ascent()) / 2f;
-            c.drawText(initials, getWidth() / 2f, base, p);
+            // o ÍCONE DA ENGINE (a ordem literal) — o glifo da marca pela
+            // ÚNICA função, na cor fraca
+            final float s = Math.min(getWidth(), getHeight()) * 0.52f;
+            UiIcons.drawBrand(c, getWidth() / 2f, getHeight() / 2f, s,
+                    BORDER, /*lodFull=*/true, /*ignite=*/1f);
         }
     }
 

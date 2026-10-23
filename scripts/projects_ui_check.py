@@ -45,11 +45,10 @@ TOKENS_F = ("0xFF0B0B0D", "0xFF121215", "0xFF1A1A1E", "0xFF1B1B20",
             # 0.12-D (D-4): a RAMPA DO FOGO (o espelho do Theme fire0..fire3
             # — a identidade do «G em chama» no lado Java)
             "0xFF7A1F0A", "0xFFE8530F", "0xFFFFA21F", "0xFFFFE08A",
-            # 0.9.6.18 (HOTFIX D7): a PALETA FIXA dos 6 matizes dos tiles
-            # de iniciais (só em InitialsThumbView; matizes sóbrios sobre
-            # grafite — o âmbar 0xFFE09A00 já era token)
-            "0xFFC4573B", "0xFF3E8E7E", "0xFF5B7FA6", "0xFF6E8B3D",
-            "0xFF8B6FA0")   # 0.9.6.10 spec G: grafite+âmbar+vidro
+            )   # 0.9.6.10 spec G: grafite+âmbar+vidro · FASE UI J: os 5
+                # matizes dos tiles de iniciais saíram com o
+                # InitialsThumbView (a ordem: o fallback é O ÍCONE DA
+                # ENGINE — as letras genéricas morreram)
 
 
 def strip_comments(src: str) -> str:
@@ -126,11 +125,13 @@ def main():
         bad += fail("botões 56dp ausentes")
     elif "ACCENT_PRESS, false" not in code or "0, 0, true" not in code:
         bad += fail("Novo FILL / Importar CONTORNO ausentes (G1-4b)")
-    elif "outline ? ACCENT : ACCENT_INK" not in code:
-        bad += fail("variante contorno do botão ausente (a tinta do fill é "
-                    "ACCENT_INK escuro — branco/claro sobre âmbar morreu)")
+    elif "b.setTextColor(outline ? TEXT1 : ACCENT_INK)" not in code:
+        bad += fail("variante contorno NEUTRA ausente (FASE UI J: "
+                    "\u00abNovo projeto\u00bb \u00e9 o \u00daNICO bot\u00e3o em brasa — o "
+                    "contorno do Importar \u00e9 border/text1, n\u00e3o accent)")
     else:
-        print("OK  Novo projeto FILL âmbar · Importar projeto SÓ CONTORNO")
+        print("OK  Novo projeto FILL âmbar (o ÚNICO em brasa) · Importar "
+              "SECUNDÁRIO neutro (FASE UI J)")
 
     # 3) FASE 9 (G1-4c): grelha adaptável
     if "GridView.AUTO_FIT" not in code or "setColumnWidth(dp(180))" not in code:
@@ -188,39 +189,38 @@ def main():
     else:
         print("OK  tempo relativo no card (ProjectsFormat.relativeTime)")
 
-    # 0.9.6.18 (D7): o ícone da app NUNCA é conteúdo de card — o default
-    # é o tile de iniciais (InitialsThumbView), e o gone_logo não desenha
-    # card nenhum (só pode existir no res/ para o launcher)
-    if "InitialsThumbView" not in code:
-        bad += fail("card default: falta o tile de iniciais (D7)")
+    # FASE UI J (a ordem do dono): o default do card SEM thumb.png é O
+    # ÍCONE DA ENGINE (o BrandThumbView desenha o glifo pela ÚNICA função)
+    # — AS LETRAS GENÉRICAS «TE»/«AS» MORRERAM (o InitialsThumbView e a
+    # fórmula de iniciais saem; o gone_logo PNG continua proibido — D7)
+    if "BrandThumbView" not in code:
+        bad += fail("card default: falta o BrandThumbView (FASE UI J — o "
+                    "ícone da engine no fallback)")
+    if "InitialsThumbView" in code or "initialsOf" in code:
+        bad += fail("as letras genéricas «TE»/«AS» ainda vivem "
+                    "(InitialsThumbView/initialsOf — a PARTE J matou-as)")
+    if "UiIcons.drawBrand(c, getWidth() / 2f, getHeight() / 2f, s," not in code:
+        bad += fail("o BrandThumbView não desenha pela ÚNICA função "
+                    "(UiIcons.drawBrand — a paridade da marca)")
     if "R.drawable.gone_logo" in code:
         bad += fail("card/header usa o PNG gone_logo — a marca desenha-se "
                     "(D6) e o ícone da app nunca é conteúdo de card (D7)")
     if "drawBrand" not in icn:
         bad += fail("UiIcons sem drawBrand (o espelho Java da Brand.cpp, D6)")
     if "thumb.png indisponível" not in code:
-        bad += fail("sem o WARN do fallback de iniciais (D7)")
+        bad += fail("sem o WARN do fallback do ícone (D7)")
 
-    # 0.9.6.19 (D18): a REGRA DAS INICIAIS — 2+ palavras → as duas
-    # primeiras; 1 palavra → PRIMEIRA + ÚLTIMA letra (projetoyygf → "PF",
-    # prooksnsn → "PN"; todas "PR" era o defeito). Check ESTRUTURAL (o
-    # método é interno da Activity — a JVM do hospedeiro não o instancía):
-    # a fórmula primeira+última tem de existir e a antiga (as 2 primeiras
-    # com Math.min) não pode voltar; o retry do D16 (a leitura repete)
-    # também se afirma aqui
-    if "w.substring(w.length() - 1)).toUpperCase()" not in code:
-        bad += fail("regra de iniciais D18 ausente (1 palavra = primeira + "
-                    "última letra)")
-    if re.search(r"substring\(0,\s*Math\.min\(2,", code):
-        bad += fail("a regra antiga das iniciais (as 2 PRIMEIRAS letras — "
-                    "todas «PR») voltou; a do dono é primeira+última (D18)")
+    # FASE UI J: NENHUMA letra de fallback volta (a fórmula D18 morreu
+    # com o tile); o retry do D16 (a leitura repete) afirma-se AQUI
+    if re.search(r"substring\(w\.length\(\)\s*-\s*1\)\)\.toUpperCase", code):
+        bad += fail("a fórmula de iniciais D18 voltou (a PARTE J matou as "
+                    "letras — o fallback é o ícone da engine)")
     if "THUMB_RETRY_MS" not in code or "postDelayed" not in code:
         bad += fail("a leitura do thumb não repete (D16: a escrita do "
-                    "engine chega DEPOIS do onResume — o card ficava em "
-                    "iniciais até ao próximo resume)")
+                    "engine chega DEPOIS do onResume)")
     else:
-        print("OK  iniciais D18 (primeira+última) · leitura do thumb repete "
-              "(D16)")
+        print("OK  sem letras de fallback (FASE UI J) · leitura do thumb "
+              "repete (D16)")
 
     # 9) TOKENS spec F — zero hex fora das constantes
     for tok in TOKENS_F:

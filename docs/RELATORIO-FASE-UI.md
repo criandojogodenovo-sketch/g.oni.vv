@@ -778,3 +778,68 @@ no MESMO commit).
   (FASE 31); o device físico é do dono.
 - **O Java/Importador/ÁudioEngine**: INTOCADOS (a cláusula da fase —
   o workspace é só visual/layout).
+
+## §13 PARTE J — TELA DE PROJETOS (a ordem do dono)
+
+**A ordem**: os cartões com MINIATURA DA CENA ou O ÍCONE DA ENGINE
+(acabar com as letras genéricas «TE»/«AS»), o nome, a data e o ⋮;
+«Novo projeto» como o ÚNICO botão em brasa; «Importar projeto»
+SECUNDÁRIO (contorno); a pesquisa e o ordenar discretos; a MESMA
+paleta/tokens do editor.
+
+**O que a auditoria achou**: o fallback do card sem thumb.png era o
+`InitialsThumbView` — o tile de INICIAIS (as letras «TE»/«AS» que o
+dono mandou acabar) com uma paleta de 6 matizes fora do Theme. O
+«Importar projeto» era contorno com BORDO E TEXTO EM BRASA — competia
+com o primário (a regra da casa: o destaque fica APENAS no
+ativo/selecionado; a ordem: «Novo projeto» é o ÚNICO em brasa). O
+resto — nome/data/⋮, a pesquisa discreta (vidro + border + lupa
+text2), o ordenar de um só ícone 48dp e os tokens da FASE UI A — já
+viviam (a ordem confirma).
+
+**A cura (o por-ficheiro — 2 ficheiros, nenhum novo)**:
+- `ProjectManagerActivity.java` — o `InitialsThumbView` MORREU (com a
+  fórmula de iniciais D18 e a paleta de 6 matizes fora do Theme); o
+  fallback é o `BrandThumbView` NOVO: o tile da casa (SURFACE2 + bordo
+  1dp BORDER) e O ÍCONE DA ENGINE desenhado pela ÚNICA função
+  (`UiIcons.drawBrand` — o espelho Java da Brand.cpp, nunca o PNG do
+  launcher) na COR FRACA (o BORDER — o mesmo G fraco do estado vazio:
+  o tile nunca compete com o nome). A miniatura da cena continua a ser
+  o thumb.png quando existe (o D16 retry intacto). O `Button24` em
+  variante contorno passou a SECUNDÁRIO NEUTRO: bordo BORDER 1dp +
+  texto/ícone TEXT1 (a brasa fica SÓ no primário).
+- `scripts/projects_ui_check.py` — o gate recalibrado com a ordem: o
+  BrandThumbView OBRIGATÓRIO, o InitialsThumbView/initialsOf
+  PROIBIDOS (as letras não voltam), o drawBrand pela ÚNICA função, o
+  contorno NEUTRO (`b.setTextColor(outline ? TEXT1 : ACCENT_INK)`) e
+  os 5 matizes fora da allowlist de tokens.
+
+**A prova**: o gate `projects_ui_check` VERDE (16 checks) + **M-UIj**
+(a brasa volta ao contorno do secundário) vermelho→reposto→verde —
+`EXIT 1` ao vivo no estado mutado («variante contorno NEUTRA ausente
+— Novo projeto é o ÚNICO botão em brasa»), VERDE depois de reposto.
+
+**As capturas**: o ecrã de projetos é JAVA (a JVM do hospedeiro não o
+instancia — a cultura do jni_parity); a prova estrutural é o gate (o
+padrão 0.9.0 spec F); as capturas de device ficam para o dono (a
+lista honesta abaixo).
+
+**Verificação**: theme_hex/projects_ui/docs-lint VERDES ·
+release-identity/R-015 VERDE vc 120 · a compilação do Java é o passo
+APK do CI (o árbitro que apanhou o ternário do colar na H) ·
+**versionCode: 119 → 120** (o §14 do RELATORIO-0.9.6.md declara o par
+no MESMO commit).
+
+**O que a parte J NÃO fez** (a lista honesta):
+
+- **Miniatura da cena REAL gerada pelo engine para TODOS os projetos**:
+  o thumb.png é escrito pelo engine a cada save (o comportamento
+  atual); os projetos mais velhos sem thumb ficam com O ÍCONE DA
+  ENGINE (a ordem confirma as duas opções do dono).
+- **As capturas de device reais da tela**: a JVM do hospedeiro não
+  desenha Android; o gate estrutural é a prova da fase (o mesmo
+  padrão das fases 0.9.x).
+- **A pesquisa e o ordenar**: já eram discretos (a ordem confirma) —
+  nada mudou neles.
+- **O core/V.ONI/importadores**: INTOCADOS (a cláusula da fase — só o
+  visual do ecrã Java).
