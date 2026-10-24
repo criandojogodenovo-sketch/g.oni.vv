@@ -227,6 +227,12 @@ GLuint compileShader(GLenum type, const char* src) {
 } // namespace
 
 bool Renderer::init() {
+    // 0.12-Z2-F1BIS (auditoria): o init começa pelo DESTROY do estado
+    // velho — o padrão da casa (o init de cada camada começa pelo
+    // destroy, como Grid/Sky/Particles/LitMaterial). Um segundo init()
+    // no MESMO contexto não vaza prog/VAO/VBO/texturas; no estado fresco
+    // os guards deixam tudo intocado.
+    shutdown();
     // 0.8.4: armazenamento dinâmico das submissões (reserve = zero realloc
     // em steady state; o frame anómalo cresce SEM cortar nada — só loga)
     subs_.clear();
@@ -735,6 +741,15 @@ void Renderer::shutdown() {
     gldbg::onDestroyed(gldbg::Kind::Buffer, dBuf);
     gldbg::onDestroyed(gldbg::Kind::Texture, dTex);
     lit_.destroy();
+    // 0.12-Z2-F1BIS (auditoria): os uniform locations REPOSTOS — o
+    // contrato "nenhum location sobrevive à recriação" (os -1 evitam o
+    // glUniform num programa morto se alguém desenhar entre term e init)
+    locProj_ = locTex_ = -1;
+    locSdfProj_ = locSdfBevel_ = locSdfSpecDepth_ = locSdfGlowW_ = -1;
+    locSdfShadowDy_ = locSdfShadowSoft_ = locSdfShadowA_ = -1;
+    locSdfSpecOn_ = locSdfGlowOn_ = locSdfSpecAdd_ = locSdfGlowAdd_ = -1;
+    locSdfAA_ = locSdfTex_ = locSdfCap_ = locSdfSurfH_ = locSdfTime_ = -1;
+    locFire1_ = locFire3_ = -1;
     if (glassTex_) { glDeleteTextures(1, &glassTex_); glassTex_ = 0; }
     if (vboSdf_)   { glDeleteBuffers(1, &vboSdf_); vboSdf_ = 0; }
     if (vaoSdf_)   { glDeleteVertexArrays(1, &vaoSdf_); vaoSdf_ = 0; }

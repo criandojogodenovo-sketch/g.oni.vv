@@ -38,8 +38,14 @@ public:
 
     // o registo (o boot do processo chama uma vez por camada, pela ordem
     // da destruição 0.6.7). owner = o objeto global da camada.
+    // 0.12-Z2-F1BIS (a auditoria): `optional` — a camada cuja falha de
+    // recreate NÃO PARA a recuperação (o «font-mono»: a device sem nenhuma
+    // mono da lista abortava o recreateAll na camada 2 COM cooldown de 30
+    // — cada recuperação falhava para sempre; o boot já aceitava a falta
+    // do mono como "ACEITÁVEL"). A falha opcional fica LOGADA e o ciclo
+    // SEGUE (a camada fica inválida — o render degrada como no boot).
     void registerLayer(const char* name, void* owner, Fn invalidate,
-                       Fn recreate) {
+                       Fn recreate, bool optional = false) {
         if (count_ >= kMaxLayers) {
             elog::error("glresources: registo CHEIO (%d) — %s fora",
                         static_cast<int>(kMaxLayers), name);
@@ -50,6 +56,7 @@ public:
         l.owner = owner;
         l.invalidate = invalidate;
         l.recreate = recreate;
+        l.optional = optional;
         l.valid = true;   // o estado GL assume-se vivo no registo
     }
 
@@ -121,11 +128,21 @@ private:
         Fn invalidate = nullptr;
         Fn recreate = nullptr;
         bool valid = true;
+        bool optional = false;   // 0.12-Z2-F1BIS: a falha não para o ciclo
     };
 
     bool recreateLayerAt(u32 i) {
         Layer& l = layers_[i];
         if (l.recreate && !l.recreate(l.owner)) {
+            if (l.optional) {
+                // 0.12-Z2-F1BIS: a opcional NÃO aborta o ciclo (o render
+                // degrada — o aviso fica — a recuperação segue)
+                elog::warn("glresources: camada OPCIONAL %s FALHOU a "
+                           "recriar (segue sem ela — o render degrada)",
+                           l.name);
+                l.valid = false;
+                return true;
+            }
             lastFailed_ = l.name;
             elog::error("glresources: camada %s FALHOU a recriar "
                         "(o render degrada e o aviso vai à Consola)",

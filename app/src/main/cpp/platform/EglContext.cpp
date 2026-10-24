@@ -9,7 +9,15 @@ bool EglContext::init(ANativeWindow* window) {
         LOGE("EGL: display nulo");
         return false;
     }
-    if (!eglInitialize(display_, nullptr, nullptr)) {
+    // 0.12-Z2-F1BIS: major/minor REAIS — o eglInitialize(dpy, nullptr,
+    // nullptr) é legal por spec mas o glvnd (libEGL de hospedeiro, Mesa)
+    // devolve EGL_FALSE 0x3001 com ponteiros nulos (PROVADO por probe
+    // isolado com os headers de Khronos: nullptr FALHA, &maj/&mn OK — o
+    // raster harness não arrancava). No Android o padrão &maj/&mn é o
+    // idiomático; nenhum device muda.
+    EGLint eglVerMajor = 0;
+    EGLint eglVerMinor = 0;
+    if (!eglInitialize(display_, &eglVerMajor, &eglVerMinor)) {
         LOGE("EGL: initialize falhou (0x%x)", eglGetError());
         return false;
     }
@@ -41,16 +49,28 @@ bool EglContext::init(ANativeWindow* window) {
     surface_ = eglCreateWindowSurface(display_, config, window, nullptr);
     if (surface_ == EGL_NO_SURFACE) {
         LOGE("EGL: surface falhou (0x%x)", eglGetError());
+        // 0.12-Z2-F1BIS: AUTO-LIMPEZA — o contexto criado acima não fica
+        // sem dono (o próximo init não cria um segundo)
+        if (context_ != EGL_NO_CONTEXT) {
+            eglDestroyContext(display_, context_);
+            context_ = EGL_NO_CONTEXT;
+        }
         return false;
     }
 
     if (eglMakeCurrent(display_, surface_, surface_, context_) != EGL_TRUE) {
         LOGE("EGL: makeCurrent falhou (0x%x)", eglGetError());
+        // 0.12-Z2-F1BIS: AUTO-LIMPEZA (surface + contexto)
+        eglDestroySurface(display_, surface_);
+        surface_ = EGL_NO_SURFACE;
+        eglDestroyContext(display_, context_);
+        context_ = EGL_NO_CONTEXT;
         return false;
     }
 
     refreshSize();
     eglSwapInterval(display_, 1);   // vsync
+    lastSwapOk_ = true;   // 0.12-Z2-F1BIS: o estado do swap recomeça limpo
     LOGI("EGL: GLES3 pronto (%dx%d)", (int)width_, (int)height_);
     return true;
 }
@@ -64,7 +84,10 @@ void EglContext::refreshSize() {
 
 void EglContext::swap() {
     if (display_ != EGL_NO_DISPLAY && surface_ != EGL_NO_SURFACE) {
-        eglSwapBuffers(display_, surface_);
+        // 0.12-Z2-F1BIS: o RETORNO do swap é VERIFICADO — o EGL_FALSE
+        // aqui (EGL_BAD_NATIVE_WINDOW/EGL_CONTEXT_LOST) é sinal de perda
+        // e alimenta a sonda do frame (contextLostNow)
+        lastSwapOk_ = (eglSwapBuffers(display_, surface_) == EGL_TRUE);
     }
 }
 

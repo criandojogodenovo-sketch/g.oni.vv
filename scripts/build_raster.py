@@ -66,6 +66,15 @@ def needs_rebuild(src, obj):
                 m = os.path.getmtime(os.path.join(root, f))
                 if m > newest:
                     newest = m
+    # 0.12-Z2-F1BIS: o SHIM (tests/stub-real) também manda — a build perdia
+    # mudanças do header de EGL (o binário velho corria com o shim velho)
+    sdir = os.path.join(REPO, "tests/stub-real")
+    for root, _dirs, files in os.walk(sdir):
+        for f in files:
+            if f.endswith(".h"):
+                m = os.path.getmtime(os.path.join(root, f))
+                if m > newest:
+                    newest = m
     return os.path.getmtime(obj) < newest
 
 

@@ -283,9 +283,26 @@ MeshData boxMesh() {
 } // namespace
 
 // ---- o PIN do import: 2 slots (baseColor + normal) vinculados no GTB1 ------
+
+// 0.12-Z2-F1BIS (a auditoria): os dirs /tmp/goni_tbN_<pid> MORREM com o
+// teste — a fuga (~2.9 GB por run da suíte inteira) empurrou o r039 para
+// errno 28 na máquina de discos pequenos (o CI nem notava: container
+// fresco/run). RAII: o ASSERT returna cedo — o guard corre na saída de
+// TODOS os caminhos.
+struct TmpDirGuard {
+    std::string base;
+    explicit TmpDirGuard(std::string b) : base(std::move(b)) {}
+    ~TmpDirGuard() {
+        if (!base.empty()) system(("rm -rf " + base).c_str());
+    }
+    TmpDirGuard(const TmpDirGuard&) = delete;
+    TmpDirGuard& operator=(const TmpDirGuard&) = delete;
+};
+
 TEST(bind_import_2_slots_e_log_por_slot) {
     const std::string base = std::string("/tmp/goni_tb1_") +
                              std::to_string(static_cast<long>(::getpid()));
+    TmpDirGuard tbGuard(base);
     system(("mkdir -p " + base + "/proj " + base + "/logs").c_str());
     const std::vector<u8> png = readFixture("green4096.png");
     ASSERT(png.size() > 8u);
@@ -331,6 +348,7 @@ TEST(bind_import_2_slots_e_log_por_slot) {
 TEST(bind_4_materiais_4_bindings) {
     const std::string base = std::string("/tmp/goni_tb2_") +
                              std::to_string(static_cast<long>(::getpid()));
+    TmpDirGuard tbGuard(base);
     system(("mkdir -p " + base + "/proj " + base + "/logs").c_str());
     const std::vector<u8> png = readFixture("green4096.png");
     ASSERT(png.size() > 8u);
@@ -470,6 +488,7 @@ TEST(audit_pick_escreve_o_slot_e_irmaos_intactos) {
 TEST(subarvore_real_pai_local_e_mundo_composto) {
     const std::string base = std::string("/tmp/goni_tb3_") +
                              std::to_string(static_cast<long>(::getpid()));
+    TmpDirGuard tbGuard(base);
     system(("mkdir -p " + base + "/proj " + base + "/logs").c_str());
     const std::vector<u8> png = readFixture("green4096.png");
     ASSERT(png.size() > 8u);
@@ -516,6 +535,7 @@ TEST(subarvore_real_pai_local_e_mundo_composto) {
 TEST(bind2_import_5_slots_matriz_log_e_matbindsof) {
     const std::string base = std::string("/tmp/goni_tb4_") +
                              std::to_string(static_cast<long>(::getpid()));
+    TmpDirGuard tbGuard(base);
     system(("mkdir -p " + base + "/proj " + base + "/logs").c_str());
     const std::vector<u8> png = readFixture("green4096.png");
     ASSERT(png.size() > 8u);
@@ -707,6 +727,7 @@ std::string gltfMultimat(u32 nMats) {
 TEST(multimat_3_materiais_import_seletor_e_slots) {
     const std::string base = std::string("/tmp/goni_tb5_") +
                              std::to_string(static_cast<long>(::getpid()));
+    TmpDirGuard tbGuard(base);
     system(("mkdir -p " + base + "/proj " + base + "/logs").c_str());
     const std::vector<u8> png = readFixture("green4096.png");
     ASSERT(png.size() > 8u);
@@ -912,6 +933,7 @@ TEST(multimat_sufixo_honesto_no_rotulo) {
 TEST(expand_p0_ciclo_de_pais_termina_e_diz) {
     const std::string base = std::string("/tmp/goni_tb6_") +
                              std::to_string(static_cast<long>(::getpid()));
+    TmpDirGuard tbGuard(base);
     system(("mkdir -p " + base + "/proj " + base + "/logs").c_str());
     // DOIS nós com mesh e pais em CICLO (0→1→0 pelos children): o parse
     // produz nodes[0].parent=1 e nodes[1].parent=0 — o walk do ancestral/
@@ -960,6 +982,7 @@ TEST(expand_p0_ciclo_de_pais_termina_e_diz) {
 TEST(expand_p0_limite_de_pecas_e_aviso) {
     const std::string base = std::string("/tmp/goni_tb7_") +
                              std::to_string(static_cast<long>(::getpid()));
+    TmpDirGuard tbGuard(base);
     system(("mkdir -p " + base + "/proj " + base + "/logs").c_str());
     // 2100 nós COM mesh (todos referem o mesmo triângulo — peças de 1
     // primitiva sem texturas, o caminho mais barato do conversor)

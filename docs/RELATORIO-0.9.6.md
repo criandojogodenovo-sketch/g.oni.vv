@@ -948,3 +948,20 @@ as capturas. pin env_sky_type no contrato novo · sentinela
 regress_sky_ground (R-071) · test_core 0 falhas · c33_virtual 1113/0 ·
 --sky2 200/0 · gates VERDES · **versionCode 132** — o par declarado aqui
 e no build config.
+### §14-w — 0.12-Z2 F1-BIS (a auditoria adicional do ciclo de vida) — versionCode 133
+
+**G8** (o par declarado no MESMO commit, a regra do §14): a AUDITORIA
+ADICIONAL (o RELATORIO-0.12-Z2-AUDIT.md — os achados disjuntos dos das
+F1/F2): o eglInitialize(nullptr) que matava o boot no glvnd (PROVADO por
+probe — &maj/&mn); o swap verificado (o lastSwapOk_ alimenta a sonda); o
+init parcial com auto-limpeza; o TERM resetA o input; o font-mono
+OPCIONAL (a device sem mono já não fica presa no cooldown); o
+Renderer::init pelo destroy + os loc* repostos; os prims na recuperação;
+o default do NaN em dayCycleSpeed; a fuga de /tmp dos testes texbind
+(RAII). O 2.º desvio do shim (RASTER_SURFACELESS=1) — a prova corre sem
+X11. R-072 + o pin z2_audit_term_reseta_input (a mutação VERMELHA ao
+vivo) · raster_z2 27/0 · raster_z2 --fuzz 150/0 · test_core 0 falhas ·
+c33 1113/0 · **versionCode 133** — o par declarado aqui e no build
+config.
+
+

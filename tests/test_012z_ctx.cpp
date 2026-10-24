@@ -667,3 +667,35 @@ TEST(simulate_loss_recupera) {
     frame();
     EXPECT(g_contextRecreations == rec0 + 1);
 }
+
+// ---------------------------------------------------------------------------
+// 0.12-Z2-F1BIS (a auditoria + a mutação M-Z10): o TERM resetA o ESTADO
+// DE INTERAÇÃO — o gesto injetado NÃO sobrevive à perda de contexto (o
+// PAUSE e o LOST_FOCUS já repunham; o term FALTAVA — o Android pode
+// destruir a janela a meio do toque sem ACTION_CANCEL garantido).
+// ---------------------------------------------------------------------------
+TEST(z2_audit_term_reseta_input) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetCtxTest();
+    glstub::fb::enabled = true;
+    javaRegistersGranted();
+    bootEditor();
+    while (vv::storage::pollResult()) {
+    }
+    g_input.injectDown(0, 100.0f, 143.0f);
+    g_input.injectMove(0, 130.0f, 150.0f);
+    EXPECT_MSG(g_input.activePointers() == 1,
+               "0.12-Z2-F1BIS: o ponteiro de teste não entrou (%u)",
+               (unsigned)g_input.activePointers());
+    android_app app;
+    std::memset(&app, 0, sizeof(app));
+    app.contentRect = {0, 0, 1280, 720};
+    onAppCmd(&app, APP_CMD_TERM_WINDOW);
+    EXPECT_MSG(g_input.activePointers() == 0,
+               "0.12-Z2-F1BIS: o gesto SOBREVIVEU ao TERM_WINDOW (o dono: "
+               "o reset é na pausa, perda de foco, PERDA DE CONTEXTO, "
+               "ACTION_CANCEL e redimensionamento)");
+    EXPECT_MSG(!g_glResources.isValid("grid"),
+               "0.12-Z2-F1BIS: o term não invalidou as camadas (contrato)");
+}

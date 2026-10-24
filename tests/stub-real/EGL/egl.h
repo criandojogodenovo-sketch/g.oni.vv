@@ -355,6 +355,73 @@ inline std::atomic<int> g_surfaceW{1280};
 inline std::atomic<int> g_surfaceH{720};
 }  // namespace rasteregl
 
+/* -------------------------------------------------------------------------
+ * 0.12-Z2-F1BIS — 2.º DESVIO (opt-in, SÓ hospedeiro): RASTER_SURFACELESS=1.
+ * Ambiente sem X11 (CI/sandbox): o eglGetDisplay(EGL_DEFAULT_DISPLAY) do
+ * produto liga-se à plataforma X11 da build do Mesa e o xcb_connect falha
+ * (PROVADO: EGL_LOG_LEVEL=debug → "EGL user error 0x3003 (EGL_BAD_ALLOC)
+ * in eglInitialize: xcb_connect failed"). O remapeia para a plataforma
+ * EGL_MESA_platform_surfaceless (0x31DD) REAL do mesmo driver — sem X, sem
+ * Wayland, o pbuffer é a superfície. O eglChooseConfig troca o bit
+ * EGL_WINDOW_BIT por EGL_PBUFFER_BIT (a plataforma surfaceless não tem
+ * configs de janela). SEM a env var, o caminho é o de sempre (X11 no
+ * hospedeiro com DISPLAY; no Android este header NÃO entra — o NDK usa o
+ * canónico). O produto é byte a byte.
+ * ----------------------------------------------------------------------- */
+#ifndef EGL_PLATFORM_SURFACELESS_MESA
+#define EGL_PLATFORM_SURFACELESS_MESA 0x31DD
+#endif
+
+#include <cstdlib>
+namespace rasteregl {
+inline bool surfacelessMode() {
+    static const bool on = (std::getenv("RASTER_SURFACELESS") != nullptr);
+    return on;
+}
+}  // namespace rasteregl
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+inline EGLDisplay eglGetDisplay(EGLNativeDisplayType display_id) {
+    using PFn = EGLDisplay(EGLAPIENTRYP)(EGLNativeDisplayType);
+    PFn real = reinterpret_cast<PFn>(eglGetProcAddress("eglGetDisplay"));
+    if (rasteregl::surfacelessMode() &&
+        display_id == reinterpret_cast<EGLNativeDisplayType>(0)) {
+        return eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA,
+                                     nullptr, nullptr);
+    }
+    return real ? real(display_id) : EGL_NO_DISPLAY;
+}
+
+inline EGLBoolean eglChooseConfig(EGLDisplay dpy, const EGLint *attrib_list,
+                                  EGLConfig *configs, EGLint config_size,
+                                  EGLint *num_config) {
+    using PFn = EGLBoolean(EGLAPIENTRYP)(EGLDisplay, const EGLint *,
+                                         EGLConfig *, EGLint, EGLint *);
+    PFn real = reinterpret_cast<PFn>(eglGetProcAddress("eglChooseConfig"));
+    if (!real) return EGL_FALSE;
+    if (rasteregl::surfacelessMode() && attrib_list) {
+        EGLint patched[65];
+        int n = 0;
+        for (; n + 1 < 64 && attrib_list[n] != EGL_NONE; n += 2) {
+            patched[n] = attrib_list[n];
+            patched[n + 1] = attrib_list[n + 1];
+            if (patched[n] == EGL_SURFACE_TYPE) {
+                patched[n + 1] = EGL_PBUFFER_BIT;   // surfaceless: sem window
+            }
+        }
+        patched[n] = EGL_NONE;
+        return real(dpy, patched, configs, config_size, num_config);
+    }
+    return real(dpy, attrib_list, configs, config_size, num_config);
+}
+
+#ifdef __cplusplus
+}
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -9459,3 +9459,113 @@ TEST(regress_sky_ground) {
                    "réplica linha a linha morreu)");
     }
 }
+
+// R-072 (0.12-Z2 F1-BIS) — A AUDITORIA ADICIONAL DO CICLO DE VIDA —
+// regress_glctx_z2_audit: os 6 achados da auditoria exaustiva que os
+// irmãos não cobrem: (1) o eglInitialize com major/minor REAIS (o nullptr
+// é legal por spec mas o glvnd devolve EGL_FALSE 0x3001 — PROVADO por
+// probe isolado: o raster harness não arrancava); (2) o RETORNO do
+// eglSwapBuffers alimenta a sonda (o EGL_FALSE era ignorado); (3) o init
+// parcial do EGL limpa o que já nasceu (o contexto sem dono); (4) o TERM
+// resetA o ESTADO DE INTERAÇÃO (o PAUSE/LOST_FOCUS repunham — o term
+// FALTAVA; o Android pode destruir a janela a meio do gesto); (5) a
+// camada OPCIONAL (font-mono) não aborta o recreateAll (a device sem
+// mono ficava presa no cooldown para sempre); (6) o Renderer::init
+// começa pelo destroy e o shutdown repõe os locations; (7) a recuperação
+// mata os meshes de prim (o term já matava).
+TEST(regress_glctx_z2_audit) {
+    std::string src;
+    EXPECT(readFileText(
+        REPO_ROOT "/app/src/main/cpp/platform/EglContext.cpp", src));
+    const std::string ec = test::stripCppComments(src);
+    // (1) o eglInitialize com ponteiros REAIS
+    EXPECT_MSG(ec.find("eglInitialize(display_, &eglVerMajor, "
+                       "&eglVerMinor)") != std::string::npos,
+               "R-072: o eglInitialize voltou ao nullptr (o glvnd devolve "
+               "EGL_FALSE 0x3001 — o raster harness não arranca)");
+    // (2) o swap VERIFICADO + a sonda consome + (3) a auto-limpeza
+    EXPECT_MSG(ec.find("eglSwapBuffers(display_, surface_) == EGL_TRUE") !=
+                   std::string::npos,
+               "R-072: o retorno do eglSwapBuffers deixou de ser "
+               "verificado (a perda no swap não alimenta a sonda)");
+    EXPECT_MSG(ec.find("lastSwapOk_ = true") != std::string::npos,
+               "R-072: o estado do swap saiu do EglContext (o init)");
+    {
+        std::string eh;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/platform/EglContext.h", eh));
+        EXPECT_MSG(eh.find("bool lastSwapOk() const") != std::string::npos,
+                   "R-072: o lastSwapOk() saiu do EglContext.h");
+    }
+    EXPECT_MSG(ec.find("eglDestroyContext(display_, context_)") !=
+                   std::string::npos,
+               "R-072: o init parcial deixou de limpar (o contexto órfão "
+               "volta)");
+    // (4) o TERM resetA o input
+    {
+        std::string m;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/platform/main.cpp", m));
+        const std::string code = test::stripCppComments(m);
+        const size_t term = code.find("case APP_CMD_TERM_WINDOW:");
+        ASSERT(term != std::string::npos);
+        const size_t nextCase = code.find("case APP_CMD_", term + 10);
+        const std::string termBody =
+            code.substr(term, nextCase == std::string::npos
+                                  ? std::string::npos
+                                  : nextCase - term);
+        EXPECT_MSG(termBody.find("g_input.resetAll();") !=
+                       std::string::npos &&
+                       termBody.find("editorRecalcHitCaches();") !=
+                           std::string::npos,
+                   "R-072: o TERM deixou de resetar o input (o gesto "
+                   "sobrevive à perda de contexto)");
+        // (7) a recuperação mata os prims
+        const size_t rec =
+            code.find("void contextRecover(const char* why)");
+        ASSERT(rec != std::string::npos);
+        EXPECT_MSG(code.find("primMeshesDestroyAll();", rec) !=
+                       std::string::npos,
+                   "R-072: a recuperação deixou de destruir os meshes de "
+                   "prim (os VAO/VBO órfãos voltam)");
+        EXPECT_MSG(code.find("!g_egl.lastSwapOk()") != std::string::npos,
+                   "R-072: a sonda deixou de consumir o estado do swap");
+    }
+    // (5) a camada opcional
+    {
+        std::string h;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/render/GlResources.h", h));
+        const std::string hc = test::stripCppComments(h);
+        EXPECT_MSG(hc.find("bool optional = false") != std::string::npos &&
+                       hc.find("camada OPCIONAL") != std::string::npos,
+                   "R-072: a camada opcional saiu do gestor (a device sem "
+                   "mono volta a não recuperar nunca)");
+        std::string m;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/platform/main.cpp", m));
+        EXPECT_MSG(test::stripCppComments(m).find(
+                       "layerRecreateFontMono, true);") !=
+                       std::string::npos,
+                   "R-072: o font-mono deixou de ser opcional no registo");
+    }
+    // (6) o Renderer::init começa pelo destroy; o shutdown repõe os locs
+    {
+        std::string r;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/render/Renderer.cpp", r));
+        const std::string rc = test::stripCppComments(r);
+        const size_t init = rc.find("bool Renderer::init()");
+        ASSERT(init != std::string::npos);
+        const size_t shutdownCall = rc.find("shutdown();", init);
+        const size_t subsClear = rc.find("subs_.clear();", init);
+        EXPECT_MSG(shutdownCall != std::string::npos &&
+                       subsClear != std::string::npos &&
+                       shutdownCall < subsClear,
+                   "R-072: o Renderer::init deixou de começar pelo destroy "
+                   "(o 2.º init no mesmo contexto vaza)");
+        EXPECT_MSG(rc.find("locProj_ = locTex_ = -1;") != std::string::npos,
+                   "R-072: o shutdown deixou de repor os uniform locations "
+                   "(o location sobrevive à recriação)");
+    }
+}

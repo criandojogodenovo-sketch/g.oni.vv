@@ -17,12 +17,17 @@ public:
     i32 width() const { return width_; }
     i32 height() const { return height_; }
 
+    // 0.12-Z2-F1BIS: o ÚLTIMO eglSwapBuffers foi TRUE? (o false alimenta
+    // a sonda de perda do frame — contextLostNow; o init repõe true)
+    bool lastSwapOk() const { return lastSwapOk_; }
+
 private:
     EGLDisplay display_ = EGL_NO_DISPLAY;
     EGLSurface surface_ = EGL_NO_SURFACE;
     EGLContext context_ = EGL_NO_CONTEXT;
     i32 width_ = 0;
     i32 height_ = 0;
+    bool lastSwapOk_ = true;   // 0.12-Z2-F1BIS: o estado do último swap
 };
 
 } // namespace vv

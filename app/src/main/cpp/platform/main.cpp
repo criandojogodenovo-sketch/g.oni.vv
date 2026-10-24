@@ -1037,9 +1037,12 @@ void glResourcesRegister() {
     done = true;
     g_glResources.registerLayer("font", nullptr, layerInvalidateFont,
                                 layerRecreateFont);
+    // 0.12-Z2-F1BIS (auditoria, achado 5): o mono é OPCIONAL no gestor —
+    // a device sem nenhuma mono da lista não pode tornar a recuperação
+    // infinita (o recreateAll abortava na camada 2 com cooldown de 30)
     g_glResources.registerLayer("font-mono", nullptr,
                                 layerInvalidateFontMono,
-                                layerRecreateFontMono);
+                                layerRecreateFontMono, true);
     g_glResources.registerLayer("gpu-cube", nullptr, layerInvalidateCube,
                                 layerRecreateCube);
     g_glResources.registerLayer("gpu-imp-quad", nullptr,
@@ -5534,6 +5537,11 @@ bool contextLostNow() {
         glIsTexture(g_renderer.whiteTexture()) != GL_TRUE) {
         return true;
     }
+    // (3) 0.12-Z2-F1BIS: o RETORNO do último eglSwapBuffers (o achado da
+    // auditoria — o EGL_FALSE era ignorado; hoje alimenta a sonda)
+    if (!g_egl.lastSwapOk()) {
+        return true;
+    }
     return false;
 }
 
@@ -5549,6 +5557,12 @@ void contextRecover(const char* why) {
     // GpuAssets liberta (o recarregamento é LAZY pela CPU, como no term)
     detachRenderersFromGpu();
     g_gpu.releaseAll();
+    // 0.12-Z2-F1BIS (auditoria, achado 2): os MESHES DE PRIM morrem AQUI
+    // também — o term chama primMeshesDestroyAll() e a recuperação NÃO
+    // chamava: os VAO/VBO/EBO dos prims ficavam órfãos até à cova correr
+    // num frame posterior (o delete de ids mortos é no-op por spec, mas é
+    // a única família fora da sincronia do ciclo)
+    primMeshesDestroyAll();
     // as camadas (fontes/quad/grid/sky/partículas/renderer) pela FONTE
     // ÚNICA da F1
     g_glResources.invalidateAll();
@@ -5969,6 +5983,16 @@ void onAppCmd(android_app* app, i32 cmd) {
             // INIT_WINDOW re-cria e re-upe tudo (fonte incluída).
             g_ready = false;
             {
+                // 0.12-Z2-F1BIS (a auditoria + o fuzzing PROVARAM): o
+                // reset do ESTADO DE INTERAÇÃO no TERM também — o PAUSE e
+                // o LOST_FOCUS já repunham, mas o term A MEIO de um gesto
+                // (o Android pode destruir a janela sem cancelar o toque)
+                // deixava o ponteiro "down" com coordenadas mortas a
+                // SOBREVIVER à recriação do contexto. O dono: o reset é
+                // «em pausa, perda de foco, PERDA DE CONTEXTO,
+                // ACTION_CANCEL e redimensionamento» — o term É a perda.
+                editorRecalcHitCaches();
+                g_input.resetAll();
                 const u32 detached = detachRenderersFromGpu();
                 const u32 gpuMeshes = g_gpu.meshCount();
                 const u32 gpuTextures = g_gpu.textureCount();

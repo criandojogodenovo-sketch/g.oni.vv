@@ -126,7 +126,11 @@ public:
         cloudCoverage = sane(cloudCoverage, kCoverageDefault, 0.0f, 1.0f);
         cloudSpeed    = sane(cloudSpeed, kSpeedDefault, 0.0f, kSpeedMax);
         timeOfDay     = sane(timeOfDay, kTodDefault, 0.0f, kTodMax);
-        dayCycleSpeed = sane(dayCycleSpeed, 1.0f, 0.0f, kCycleMax);
+        // 0.12-Z2-F1BIS (auditoria do WE): o DEFAULT do NaN é o do campo
+        // (0.0 = o auto-ciclo de sempre) — o 1.0 antigo LIGAVA o
+        // auto-ciclo quando o .goni vinha corrompido (comportamento novo
+        // por NaN)
+        dayCycleSpeed = sane(dayCycleSpeed, 0.0f, 0.0f, kCycleMax);
         cloudHeight   = sane(cloudHeight, kHeightDefault, kHeightMin,
                              kHeightMax);
         if (cloudCoverage < 0.0f) cloudCoverage = 0.0f;

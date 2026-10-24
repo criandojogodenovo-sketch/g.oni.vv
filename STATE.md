@@ -1,6 +1,6 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-24 · vc: 132 · Último commit: este (a 0.12-Z2 F2 —
+Atualizado: 2026-10-24 · vc: 133 · Último commit: este (a 0.12-Z2 F2 —
 o tom de chão + o varrimento + o ⌖; o RELATORIO-0.12-Z2-RASTER.md §F2);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
@@ -8,6 +8,24 @@ o tom de chão + o varrimento + o ⌖; o RELATORIO-0.12-Z2-RASTER.md §F2);
 > Atualiza-se no MESMO commit que fecha a sub-fase (regra §6 abaixo).
 
 ## §1 Onde estamos
+
+- **Campanha 0.12-Z2 (CONTEXTO GL + WE + CLIMA + AUDITORIA TOTAL) —
+  F1-BIS FECHADA (vc 133)**. A AUDITORIA ADICIONAL do ciclo de vida (os
+  achados DISJUNTOS dos das F1/F2): o eglInitialize(nullptr) matava o
+  boot no glvnd (PROVADO por probe — major/minor locais); o retorno do
+  eglSwapBuffers verificado (o lastSwapOk_ alimenta a sonda); o init
+  parcial com auto-limpeza; o TERM resetA o ESTADO DE INTERAÇÃO (o
+  Android destrói a janela a meio do gesto); o font-mono OPCIONAL no
+  gestor (o recreateAll já não aborta na camada 2); o Renderer::init
+  começa pelo destroy + os loc* repostos; os prims mortos na
+  recuperação; o default do NaN em dayCycleSpeed é o do campo; a fuga de
+  ~2,9 GB/run dos testes texbind morta (o RAII TmpDirGuard). O 2.º
+  desvio do shim (RASTER_SURFACELESS=1 — o eglGetDisplay → a plataforma
+  surfaceless do Mesa + o bit WINDOW→PBUFFER): a prova inteira corre
+  SEM X11. R-072 (+ o pin z2_audit_term_reseta_input, a mutação
+  VERMELHA ao vivo). raster_z2 27/0 · raster_z2 --fuzz 150/0 · test_core
+  0 falhas · c33 1113/0 · a corrida latente do streaming_paralelo é
+  PRÉ-EXISTENTE (prova no §A.2.5 do RELATORIO-0.12-Z2-AUDIT.md).
 
 - **Campanha 0.12-Z2 (CONTEXTO GL + WE + CLIMA + AUDITORIA TOTAL) — F0
   (vc 130) e F1 (vc 131) FECHADAS**. **F1**: o --fuzz no raster_z2 —
