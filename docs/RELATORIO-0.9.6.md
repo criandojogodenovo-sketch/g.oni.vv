@@ -895,3 +895,20 @@ das camadas do gestor). O critério «deteta, recria e continua em menos de
 simulate_loss_recupera + R-069 regress_glctx_fase4 · test_core 0 falhas ·
 c33_virtual 1113/0 (era 1008 — +105 checks dos cenários) · gates VERDES ·
 **versionCode 129** — o par declarado aqui e no build config.
+
+### §14-t — 0.12-Z2 F0 (o ambiente de prova com GLES REAL) — versionCode 130
+
+**G8** (o par declarado no MESMO commit, a regra do §14): a FASE 0 da
+campanha Z2 (o RELATORIO-0.12-Z2-RASTER.md): o raster_z2 — a engine a
+correr contra o DRIVER GLES REAL (Mesa/llvmpipe 25.0.7, OpenGL ES 3.2) no
+hospedeiro via EGL pbuffer (o ÚNICO desvio do header canónico é o shim
+eglCreateWindowSurface→pbuffer, documentado no próprio ficheiro). A grelha,
+o céu, o cubo, o gizmo e a UI PROVADOS em PIXELS (glReadPixels — 27 checks,
+0 falhas; fwidth corre). Os 4 sintomas em captura ANTES (a zona azul = o
+below-horizon do FS do céu — SkyRenderer.cpp `clamp(dir.y,0,1)`; a perda
+TERM/INIT REAL recupera grelha+texto+cena no caminho fiel ao device; 2
+falsos positivos REFUTADOS como artefactos do hospedeiro). A bisseção por
+passe aferrada (7 passes vivos). O flash do STORM acende e morre (452205 px
+pico→morto). ZERO linhas de produto tocadas · test_core/c33 intactos ·
+raster_z2 27/0 · **versionCode 130** — o par declarado aqui e no build
+config.

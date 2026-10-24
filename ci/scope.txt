@@ -56,3 +56,17 @@ gradlew
 gradlew.bat
 settings.gradle
 test-wiring010-logs/
+# 0.12-Z2 F0 (a FASE 0 da campanha Z2): o ambiente de prova com
+# rasterização GLES 3.0 REAL (Mesa/llvmpipe no hospedeiro) — o pedido do
+# dono («pixels lidos com glReadPixels, não contadores»). O raster_z2 NÃO
+# entra no ctest; os headers reais de Khronos sombreiam os stubs SÓ nesta
+# build; ZERO linhas de produto tocadas.
+tests/stub-real/GLES3/gl3.h
+tests/stub-real/GLES3/gl3platform.h
+tests/stub-real/KHR/khrplatform.h
+tests/stub-real/EGL/egl.h
+tests/stub-real/EGL/eglplatform.h
+scripts/build_raster.py
+tests/raster_z2.cpp
+docs/RELATORIO-0.12-Z2-RASTER.md
+docs/capturas-0.12-Z2/

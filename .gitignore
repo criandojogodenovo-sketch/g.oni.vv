@@ -55,3 +55,7 @@ build-dbg/
 /y-*.png
 tests/build-obj/
 tests/build-obj-c33/
+tests/build-obj-raster/
+out-raster/
+raster-logs/
+raster-cache/
