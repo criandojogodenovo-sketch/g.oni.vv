@@ -193,7 +193,88 @@ o log de erros apanha GL errors do passe.
     (o reset de estado à entrada de cada passe; os clamps do WE).
 
 
-## §F2 — A ORIGEM DA SOMBRA E A ORDEM DOS PASSES (a preencher)
+## §F2 — A ORIGEM DA SOMBRA E A ORDEM DOS PASSES (FASE 2)
+
+### F2.1 — A CAUSA RAIZ DA SOMBRA (com ficheiro:linha — o pedido do dono)
+
+**O NaN no `fogDensity` do WorldEnvironment envenena a exp2 do lit FS.**
+A cadeia:
+
+1. `Environment::clampFields` (components/Environment.h:82..91 da árvore
+   F1) aferia os limites com comparações (`if (v < 0)`/`if (v > max)`) —
+   **comparações com NaN são SEMPRE falsas**: um NaN entrava e SAÍA.
+2. O lit FS consumia `uFogDensity` direto: `fog = 1.0 - exp(-pow(len *
+   uFogDensity, 2.0))` (render/Material.cpp:157) — **NaN propaga**: fog =
+   NaN → `mix(c, uFogColor, NaN)` → `outColor = NaN` → **o fragmento sai
+   INDEFINIDO (preto no Mali do C33)** — o dono vê «uma sombra escura por
+   cima da cena».
+3. O mediump (fp16 no Mali-GE8320) amplificava: `pow(x, 2.0)` em fp16 a
+   distância perdia precisão e criava bandas/escuridão SEM NaN (a H3 sem
+   corrupção).
+4. ONDE NASCE o NaN: corrupção do .goni (o serializer aceita qualquer
+   f32), um HDRI com média NaN (o ambient do C), ou um float degenerado
+   de um edit por slider. INTERMITENTE por construção — o sintoma «às
+   vezes» do dono.
+
+**Porque explica o «MESMO SEM WorldEnvironment»**: o resto das
+candidatas do F0.3 (H1 o scrim preso, H2 textura morta) continua de pé —
+mas o H3 tinha ESTE buraco real, agora fechado na FONTE. O dono fecha o
+caso no device com os toggles do F0 (o §F0.3 mantém-se).
+
+### F2.2 — O QUE ENTROU
+
+| Ficheiro | O que faz |
+|---|---|
+| `components/Environment.h` | `clampFields()` ganha **`sane(v, def, lo, hi)`** — a REJEIÇÃO de NaN/inf ANTES da clamp (o NaN/inf volta ao DEFAULT; os finitos ficam byte a byte). Cobre fogDensity/ambient/skyColor/fogColor/sunDirection/cloudCoverage/cloudSpeed/timeOfDay/dayCycleSpeed/cloudHeight |
+| `render/Material.cpp` | o lit FS: a névoa em **`highp float`** + **sem pow** (`fogD*fogD` — exato e barato) + `max(uFogDensity, 0.0)` local (a 2.ª linha de defesa) — a fórmula exp2 byte a byte para densidades finitas |
+| `render/Grid.cpp` | o depth test da grelha **EXPLÍCITO**: `glEnable(GL_DEPTH_TEST)` + `glDepthFunc(GL_LESS)` (o inheritado era o vazamento — o dono: «a grelha NUNCA pode ser coberta por nada do mundo») |
+| `platform/main.cpp` | a ENTRADA do pass 3D repõe `glDepthFunc(GL_LESS)` (o único estado que ninguém repunha — o test/write/blend/cull já eram repostos pelos draws) |
+
+### F2.3 — A ORDEM DOS PASSES (antes = depois — agora AFERRADA)
+
+limpar → céu/fundo (depth OFF, mask OFF, blend OFF — SkyRenderer.cpp:323) →
+geometria (depth ON, cull ON — Renderer.cpp:465) → partículas (blend ON,
+mask OFF) → **grelha (depth test ON EXPLÍCITO + func LESS + mask OFF +
+blend ON)** → gizmos (UI-space, sem depth — beginUiPass) → UI (depth OFF,
+scissor OFF, viewport cheio — beginUiPass:401..410; o fim repõe blend —
+endFrame:600). **A grelha e os gizmos NUNCA são cobertos por nada do
+mundo.** As fronteiras do F0 logam a ordem real no engine.log.
+
+### F2.4 — O RELATÓRIO DE 16 ITENS (FASE 2)
+
+1. **Objetivo**: a origem da sombra + a ordem fixa dos passes + o reset
+   de estado à entrada + os clamps do WE.
+2. **Causa raiz**: F2.1 (o NaN na névoa — ficheiro:linha).
+3. **Sintomas cobertos**: a sombra escura (a H3 fechada na fonte); a
+   grelha que «às vezes» desaparece (o depth test inheritado); as bandas
+   de névoa a distância (o mediump).
+4. **O que mudou**: F2.2 (4 ficheiros, cada um justificado).
+5. **O que NÃO foi tocado**: os shaders do céu/partículas (já highp com
+   precision highp float), o tema, V.ONI, importadores, física, .gmesh, o
+   layout visual.
+6. **Ordem dos passes**: F2.3 (antes = depois; agora explícita e aferrada
+   pela sentinela).
+7. **Estado GL**: depth func reposto à entrada do 3D; a grelha com o trio
+   do dono explícito; o fim da UI repõe blend (endFrame — verificado).
+8. **Fullscreen quads**: SÓ o céu (antes da geometria, blend OFF, mask
+   OFF — o contrato do dono cumpre-se; 0 FBOs, 0 outros quads).
+9. **Clamps WE**: o sane NaN/inf + as clamps existentes — TODOS os campos
+   f32 do Environment.
+10. **Testes novos**: `env_sana_nan` (o NaN/inf morre na fonte; os finitos
+    byte a byte; o meio-dia da D intacto).
+11. **Sentinela**: **R-067** `regress_glctx_fase2` (o sane no fonte; o
+    highp/x*x; o pow PROIBIDO; a grelha explícita; o depth func na
+    entrada).
+12. **Verificação local**: test_core 0 falhas; c33_virtual 1008/0; gates
+    verdes.
+13. **CI**: o run do commit desta fase.
+14. **Capturas**: as do dono (com/sem WE; a névoa a 0 e a 1 — o byte a
+    byte das densidades finitas é o pin).
+15. **Riscos**: o highp na névoa custa ALU mínima (1 exp + 1 mul) — o C33
+    mantém o orçamento (o c33 1008/0 prova o replay).
+16. **Próximo passo**: FASE 3 — as sondas por frame + a recuperação +
+    o reset do estado de interação.
+
 
 ## §F3 — A DETEÇÃO E A RECUPERAÇÃO (a preencher)
 

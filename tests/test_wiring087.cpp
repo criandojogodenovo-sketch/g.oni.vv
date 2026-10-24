@@ -906,6 +906,7 @@ TEST(wiring087_boot_e_frame_smoke_com_browser_aberto) {
     // cubo, grid, ready) — como o C33 faz
     android_app app;
     std::memset(&app, 0, sizeof(app));
+    glResourcesRegister();   // 0.12-Z F1: o registo do android_main no hospedeiro (idempotente)
     onAppCmd(&app, APP_CMD_INIT_WINDOW);
     EXPECT(g_ready);
     EXPECT(g_egl.width() == 1280);
@@ -1234,6 +1235,7 @@ TEST(wiring089_device_zoom_far_dinamico_e_grelha_adaptativa) {
 
     android_app app;
     std::memset(&app, 0, sizeof(app));
+    glResourcesRegister();   // 0.12-Z F1: o registo do android_main no hospedeiro (idempotente)
     onAppCmd(&app, APP_CMD_INIT_WINDOW);
     EXPECT(g_ready);
 
@@ -1679,6 +1681,7 @@ TEST(wiring011_device_frame_audio_mode_e_glyphs) {
     javaRegistersGranted();
     android_app app;
     std::memset(&app, 0, sizeof(app));
+    glResourcesRegister();   // 0.12-Z F1: o registo do android_main no hospedeiro (idempotente)
     onAppCmd(&app, APP_CMD_INIT_WINDOW);
     EXPECT(g_ready);
     if (!g_font.ok()) {
@@ -1775,6 +1778,7 @@ TEST(wiring091_device_textwin_abre_portrait_ime_escreve) {
 
     android_app app;
     std::memset(&app, 0, sizeof(app));
+    glResourcesRegister();   // 0.12-Z F1: o registo do android_main no hospedeiro (idempotente)
     onAppCmd(&app, APP_CMD_INIT_WINDOW);
     EXPECT(g_ready);
     if (!g_font.ok()) {
@@ -1859,6 +1863,7 @@ TEST(wiring091_device_rotacao_nao_corrompe_render_nem_perde_buffer) {
 
     android_app app;
     std::memset(&app, 0, sizeof(app));
+    glResourcesRegister();   // 0.12-Z F1: o registo do android_main no hospedeiro (idempotente)
     onAppCmd(&app, APP_CMD_INIT_WINDOW);
     if (!g_font.ok()) {
         const char* paths[] = {FONT_FIXTURE};
@@ -1882,6 +1887,7 @@ TEST(wiring091_device_rotacao_nao_corrompe_render_nem_perde_buffer) {
     eglstub::g_surfaceH = 1536;
     onAppCmd(&app, APP_CMD_TERM_WINDOW);
     EXPECT(!g_ready);
+    glResourcesRegister();   // 0.12-Z F1: o registo do android_main no hospedeiro (idempotente)
     onAppCmd(&app, APP_CMD_INIT_WINDOW);
     EXPECT(g_ready);
     EXPECT(g_egl.width() == 720);     // a superfície rodou

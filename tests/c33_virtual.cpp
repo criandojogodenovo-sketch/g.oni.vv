@@ -1208,6 +1208,9 @@ int main() {
 
         // o BOOT REAL do device: INIT_WINDOW (EGL feliz 1536x720, renderer,
         // fonte, cubo, grid, load da cena ativa + MIGRACAO silenciosa)
+        // 0.12-Z F1: o registo das camadas do gestor (o android_main faz no
+        // device; o replay faz aqui — idempotente)
+        glResourcesRegister();
         android_app app;
         std::memset(&app, 0, sizeof(app));
         app.contentRect = {0, 24, 1512, 720};   // insets: status 24 + pill 24

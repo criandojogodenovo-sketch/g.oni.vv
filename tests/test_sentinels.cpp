@@ -9194,3 +9194,64 @@ TEST(regress_glctx_fase1) {
                    "R-066: o contrato do gestor sumiu");
     }
 }
+
+// R-067 (0.12-Z F2) — A SOMBRA NÃO VOLTA — regress_glctx_fase2: o NaN/inf
+// nos campos do WorldEnvironment é REJEITADO NA FONTE (a clamp não apanha
+// NaN — comparações com NaN são sempre falsas — e o fogDensity NaN
+// envenena a exp2 do lit FS: outColor NaN = O ECÃ PRETO, a candidata H3
+// da sombra), a névoa do FS corre em HIGH P e SEM pow, a GRELHA tem o
+// estado EXPLÍCITO (depth test ON + func LESS — o inheritado é o
+// vazamento) e a entrada do pass 3D repõe o depth func.
+TEST(regress_glctx_fase2) {
+    // (1) o sane do WE no fonte (a rejeição ANTES da clamp)
+    {
+        std::string h;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/components/Environment.h", h));
+        const std::string code = test::stripCppComments(h);
+        EXPECT_MSG(code.find("static f32 sane(f32 v, f32 def, f32 lo, f32 hi)")
+                       != std::string::npos &&
+                       code.find("!std::isfinite(v)") != std::string::npos &&
+                       code.find("fogDensity = sane(fogDensity") !=
+                           std::string::npos,
+                   "R-067: a rejeição de NaN/inf saiu do WE (a sombra "
+                   "preta volta pela névoa envenenada)");
+    }
+    // (2) a névoa do FS em HIGH P e SEM pow (o mediump é fp16 no Mali do
+    //     C33 — a distância degenerava)
+    {
+        std::string m;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/render/Material.cpp", m));
+        const std::string code = test::stripCppComments(m);
+        EXPECT_MSG(code.find("highp float fog = 1.0 - exp(-fogD * fogD);") !=
+                       std::string::npos,
+                   "R-067: a névoa do lit FS perdeu o highp/x*x (o dono: "
+                   "highp para fog)");
+        EXPECT_MSG(code.find("pow(length") == std::string::npos,
+                   "R-067: o pow() voltou à névoa (o x*x é o contrato)");
+    }
+    // (3) a grelha com o estado EXPLÍCITO (o teste unitário do estado é do
+    //     device — o fonte é o contrato)
+    {
+        std::string g;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/render/Grid.cpp", g));
+        const std::string code = test::stripCppComments(g);
+        EXPECT_MSG(code.find("glEnable(GL_DEPTH_TEST);") !=
+                       std::string::npos,
+                   "R-067: a grelha voltou a INHERITAR o depth test");
+        EXPECT_MSG(code.find("glDepthFunc(GL_LESS);") != std::string::npos,
+                   "R-067: a grelha perdeu o depth func explícito");
+    }
+    // (4) a entrada do pass 3D repõe o depth func (defesa em profundidade)
+    {
+        std::string src;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/platform/main.cpp", src));
+        const std::string code = test::stripCppComments(src);
+        EXPECT_MSG(code.find("glDepthFunc(GL_LESS);") != std::string::npos,
+                   "R-067: a entrada do passe 3D deixou de repor o depth "
+                   "func");
+    }
+}

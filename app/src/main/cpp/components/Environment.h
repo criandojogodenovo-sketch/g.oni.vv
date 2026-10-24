@@ -78,8 +78,29 @@ public:
     f32 cloudHeight    = kHeightDefault;  // a escala vertical do plano das
                                        // nuvens (1 = o céu da D byte a byte)
 
-    // a clamp dos campos (o padrão AudioPlayer::clampFields)
+    // 0.12-Z F2 — A REJEIÇÃO de NaN/inf (o dono: «rejeitar NaN/inf e usar
+    // padrões»): as comparações com NaN são SEMPRE falsas — a clamp de
+    // baixo NUNCA apanha um NaN, e o NaN no fogDensity envenena a exp2 do
+    // lit FS (outColor NaN = o ECÃ PRETO — a candidata H3 da sombra). O
+    // sane corre ANTES da clamp: o NaN/inf volta ao DEFAULT e a clamp faz
+    // o resto. Nada disto muda o byte a byte dos valores finitos.
+    static f32 sane(f32 v, f32 def, f32 lo, f32 hi) {
+        if (!std::isfinite(v)) {
+            return def;
+        }
+        return v;
+    }
     void clampFields() {
+        fogDensity = sane(fogDensity, 0.0f, 0.0f, 1.0f);
+        ambient    = sane(ambient, 1.0f, 0.0f, 8.0f);
+        for (int i = 0; i < 4; ++i) {
+            skyColor[i] = sane(skyColor[i], 0.5f, 0.0f, 1.0f);
+            fogColor[i] = sane(fogColor[i], 0.5f, 0.0f, 1.0f);
+        }
+        for (int i = 0; i < 3; ++i) {
+            sunDirection[i] =
+                sane(sunDirection[i], kSunDirDefault[i], -1.0f, 1.0f);
+        }
         if (fogDensity < 0.0f) fogDensity = 0.0f;
         if (fogDensity > 1.0f) fogDensity = 1.0f;
         if (ambient < 0.0f) ambient = 0.0f;
@@ -102,6 +123,12 @@ public:
                 if (cols[c][i] > 1.0f) cols[c][i] = 1.0f;
             }
         }
+        cloudCoverage = sane(cloudCoverage, kCoverageDefault, 0.0f, 1.0f);
+        cloudSpeed    = sane(cloudSpeed, kSpeedDefault, 0.0f, kSpeedMax);
+        timeOfDay     = sane(timeOfDay, kTodDefault, 0.0f, kTodMax);
+        dayCycleSpeed = sane(dayCycleSpeed, 1.0f, 0.0f, kCycleMax);
+        cloudHeight   = sane(cloudHeight, kHeightDefault, kHeightMin,
+                             kHeightMax);
         if (cloudCoverage < 0.0f) cloudCoverage = 0.0f;
         if (cloudCoverage > 1.0f) cloudCoverage = 1.0f;
         if (cloudSpeed < 0.0f) cloudSpeed = 0.0f;

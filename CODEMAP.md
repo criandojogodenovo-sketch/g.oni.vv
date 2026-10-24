@@ -71,19 +71,19 @@ Atualizado: 2026-10-24 · vc: 124
   composeWorld é a FONTE ÚNICA da composição parent∘local).
 - **app/src/main/cpp/render/** — o desenho: Renderer, Mesh, Camera, Grid,
   Cube/Primitives, Material (+ o PBR-LITE pela FONTE ÚNICA **Pbr.h** — o
-  normal por derivadas, o rough/metal glTF, a névoa exp2 (0 = MORTA), o
-  uAmbientScale; **0.12-Y**), Texture, GpuAssets (+ `impostorTexture`),
+  normal por derivadas, o rough/metal glTF, a névoa exp2 (0 = MORTA;
+  **0.12-Z F2**: highp + fogD·fogD, o sane do WE rejeita NaN), o
+  uAmbientScale; 0.12-Y), Texture, GpuAssets (+ `impostorTexture`),
   BlockMesh (por BLOCOS do .gmesh v3), Impostor.h (a decisão PURA),
-  QuadBatch, DrawStats, ThumbPng (PNG via zlib), SkyRenderer.{h,cpp}
-  (**0.12-Y D**: o CÉU PROCEDURAL — o quad fullscreen + as puras sky:: que o FS replica;
+  QuadBatch, DrawStats, ThumbPng, SkyRenderer.{h,cpp}
+  (**0.12-Y D**: o CÉU PROCEDURAL — o quad fullscreen + as puras sky::;
   **0.12-Y-F2**: o uThunderFlash — o FLASH da trovoada lido do
   AmbientEnvironment ATIVO em STORM), ParticleRenderer.{h,cpp} +
   ParticleShader.h (**0.12-Y-F1**: as partículas GPU; **0.12-Y-F2**: o
   uWind — o vento GLOBAL do 1.º WindTIC ATIVO, a sobrecarga pura
-  particlePos com vento), GlDebug.h (**0.12-Z F0**: o DIAGNÓSTICO do
-  contexto GL — toggles POR PASSE, contadores, estado por passe),
-  GlResources.h (**0.12-Z F1**: o GLResourceManager — a FONTE ÚNICA da
-  recriação do contexto; 8 camadas; a câmara sã no lifecycle),
+  particlePos com vento), GlDebug.h (**0.12-Z F0**: toggles POR PASSE,
+  contadores GL, estado por passe), GlResources.h (**0.12-Z F1**: o
+  GLResourceManager — a recriação do contexto com DONO; 8 camadas),
   **0.12-D (DORMENTE desde a 0.12-E)**: o SdfBatch.h + o 3.º PROGRAMA
   progSdf_ (o FS replica o app/src/main/cpp/ui/Sdf.h; runs pelo flag
   `sdf`) + o ramo FOGO-ONLY + o Glass.h (o KAWASE dual) + o captureGlass

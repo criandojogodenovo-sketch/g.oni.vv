@@ -5940,6 +5940,11 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
     const bool showPart = !dbg || gldbg::g_masks.geometry ||
                           gldbg::g_masks.post;   // as partículas pertencem ao
                           // bloco 3D (o toggle "pós" é no-op; a geometria manda)
+    // 0.12-Z F2 (o dono: «repor explicitamente o estado GL à entrada de
+    // cada passe»): o DEPTH FUNC de sempre — qualquer passe que o tenha
+    // mudado não altera o mundo (o test/write/blend já são repostos pelos
+    // draws; o func era o único que ninguém repunha)
+    glDepthFunc(GL_LESS);
     const gldbg::PassState passIn = gldbg::capture();
     const ComponentStore& comps = g_scene.components();
     // 0.12-Y (3.Y-C): o WORLDENVIRONMENT do frame (o 1.º ATIVO manda — o

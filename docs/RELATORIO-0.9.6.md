@@ -851,3 +851,18 @@ na thread de render; o Java drena via storage::pollResult()/ImeQueue no
 topo do frame). pins ×2 (glresources_ciclo, camera_sana) + R-066
 regress_glctx_fase1 · test_core 0 falhas (o CI é o árbitro) · gates
 VERDES · **versionCode 126** — o par declarado aqui e no build config.
+
+### §14-q — 0.12-Z F2 (a origem da sombra: o WE sã + a névoa highp) — versionCode 127
+
+**G8** (o par declarado no MESMO commit, a regra do §14): a FASE 2 da
+campanha (o RELATORIO-0.12-Z-GLCTX.md §F2): a CAUSA RAIZ da sombra com
+ficheiro:linha (o fogDensity NaN passava pela clamp — comparações com
+NaN são sempre falsas — e envenenava a exp2 do lit FS: outColor NaN = o
+preto do dono), a cura na FONTE (Environment::sane — a rejeição de
+NaN/inf em TODOS os campos f32), a névoa do FS em highp float + sem pow
+(fogD*fogD), a grelha com o trio do dono EXPLÍCITO (depth test ON, func
+LESS, write OFF) e a entrada do pass 3D a repor o depth func. A ordem
+dos passes aferrada (antes = depois; a sentinela vigia). pin
+env_sana_nan + R-067 regress_glctx_fase2 · test_core 0 falhas ·
+c33_virtual 1008/0 · gates VERDES · **versionCode 127** — o par
+declarado aqui e no build config.

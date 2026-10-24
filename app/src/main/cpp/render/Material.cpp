@@ -153,8 +153,14 @@ void main() {
     float spec = pow(max(dot(n, h), 0.0), shin);
     float mdiff = 1.0 - clamp(metal, 0.0, 1.0) * 0.85;
     vec3 c = kAmbient * uAmbientScale + uLightCol * (alb * mdiff * diff + spec * mix(vec3(0.04), alb, metal)) + uEmissive;
-    // a névoa exp2 (density 0 = morta — o byte a byte do lit de sempre)
-    float fog = 1.0 - exp(-pow(length(uEye - vWorldPos) * uFogDensity, 2.0));
+    // a névoa exp2 (density 0 = morta — o byte a byte do lit de sempre).
+    // 0.12-Z F2 (o dono): HIGH P na névoa (o mediump do FS é fp16 no Mali
+    // do C33 — a distância degenerava) e SEM pow (x*x é exato e barato);
+    // SEM divisão (a exp2 só multiplica). Um uFogDensity NaN não chega
+    // AQUI (o Environment::clampFields rejeita-o na fonte), mas o clamp
+    // local é a segunda linha de defesa
+    highp float fogD = length(uEye - vWorldPos) * max(uFogDensity, 0.0);
+    highp float fog = 1.0 - exp(-fogD * fogD);
     c = mix(c, uFogColor, clamp(fog, 0.0, 1.0));
     outColor = vec4(c * uTint, uAlphaMode == 2 ? alpha : 1.0);
 })";

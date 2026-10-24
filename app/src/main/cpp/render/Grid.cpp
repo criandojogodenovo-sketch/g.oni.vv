@@ -205,7 +205,12 @@ DrawStats Grid::draw(const Mat4& vp, const Vec3& camPos, f32 focusDist) const {
     }
     // transparente: blend com fade, depth test ligado (respeita os TICs),
     // depth write desligado (nunca oculta nada); sem cull — o quad é visto
-    // de cima e de baixo (pitch ±89°)
+    // de cima e de baixo (pitch ±89°).
+    // 0.12-Z F2 (o dono: «a grelha NUNCA pode ser coberta por nada do
+    // mundo»): o depth test era INHERITADO — um passe que o deixasse OFF
+    // (ou com outra func) mudava a grelha sem ninguém saber. EXPLÍCITO:
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);   // o MESMO func da geometria (o default da casa)
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE);

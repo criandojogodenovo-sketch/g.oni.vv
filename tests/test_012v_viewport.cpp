@@ -113,6 +113,8 @@ void resetViewportTest() {
 
 // boot REAL (INIT_WINDOW) + fonte fixture (o device tem as do Android)
 void bootEditor() {
+    glResourcesRegister();   // 0.12-Z F1: o registo é do android_main — o
+                             // hospedeiro regista à mão (idempotente)
     android_app app;
     std::memset(&app, 0, sizeof(app));
     onAppCmd(&app, APP_CMD_INIT_WINDOW);

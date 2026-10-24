@@ -31,6 +31,7 @@
 
 #include "FakeStorage.h"
 #include "render/GlDebug.h"   // O SUJEITO DOS PINS
+#include "components/Environment.h"   // 0.12-Z F2: o WE sã
 
 // ponte Java (o papel do "stub Java" — o padrão do test_wiring087)
 extern "C" void Java_vv_goni_VvActivity_nativeRegisterActivity(
@@ -500,4 +501,51 @@ TEST(camera_sana) {
     cameraEnsureSane();
     EXPECT(nearEqF(g_camera.yaw, yaw0, 1e-7f));
     EXPECT(nearEqF(g_camera.dist, 6.0f, 1e-5f));
+}
+
+// ---------------------------------------------------------------------------
+// 7. O WE SÃ (0.12-Z F2): o NaN/inf nos campos do Environment é REJEITADO
+// (as comparações com NaN são sempre falsas — a clamp de baixo NUNCA
+// apanhava) e volta ao DEFAULT; os valores finitos ficam byte a byte. O
+// NaN no fogDensity envenenava a exp2 do lit FS (outColor NaN = o PRETO
+// do dono — a candidata H3 da sombra).
+// ---------------------------------------------------------------------------
+TEST(env_sana_nan) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+
+    const f32 nan = std::numeric_limits<f32>::quiet_NaN();
+    const f32 inf = std::numeric_limits<f32>::infinity();
+    Environment e;
+    e.fogDensity = nan;
+    e.ambient = inf;
+    e.skyColor[0] = nan;
+    e.timeOfDay = nan;
+    e.cloudCoverage = inf;
+    e.clampFields();
+    EXPECT_MSG(nearEqF(e.fogDensity, 0.0f, 1e-6f),
+               "0.12-Z F2: o NaN no fogDensity SOBREVIVEU (a névoa ia "
+               "envenenar o lit FS — o preto do dono)");
+    EXPECT_MSG(nearEqF(e.ambient, 1.0f, 1e-5f),
+               "0.12-Z F2: o inf no ambient não voltou ao default");
+    EXPECT_MSG(nearEqF(e.skyColor[0], 0.5f, 1e-5f),
+               "0.12-Z F2: o NaN na cor do céu sobreviveu");
+    EXPECT_MSG(nearEqF(e.timeOfDay, 12.0f, 1e-5f),
+               "0.12-Z F2: o NaN na hora não voltou ao meio-dia");
+    EXPECT_MSG(nearEqF(e.cloudCoverage, 0.4f, 1e-5f),
+               "0.12-Z F2: o inf nas nuvens não voltou ao default");
+
+    // os valores FINITOS ficam byte a byte (o sane não toca neles)
+    Environment f;
+    f.fogDensity = 0.35f;
+    f.ambient = 2.5f;
+    f.clampFields();
+    EXPECT(nearEqF(f.fogDensity, 0.35f, 1e-6f));
+    EXPECT(nearEqF(f.ambient, 2.5f, 1e-6f));
+
+    // a identidade do meio-dia (a D) sobrevive ao sane
+    Environment g;
+    g.timeOfDay = 12.0f;
+    g.clampFields();
+    EXPECT(nearEqF(g.timeOfDay, 12.0f, 1e-5f));
 }

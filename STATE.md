@@ -1,7 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-24 · vc: 126 · Último commit: este (a 0.12-Z F1 —
-o GLResourceManager + a câmara sã; o RELATORIO-0.12-Z-GLCTX.md §F1);
+Atualizado: 2026-10-24 · vc: 127 · Último commit: este (a 0.12-Z F2 —
+a ORIGEM DA SOMBRA: o WE sã + a névoa highp; o
+RELATORIO-0.12-Z-GLCTX.md §F2);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -9,20 +10,22 @@ o GLResourceManager + a câmara sã; o RELATORIO-0.12-Z-GLCTX.md §F1);
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-Z (ANTI-PERDA DE CONTEXTO OPENGL + A SOMBRA) — F0 e
-  F1 FECHADAS (vc 125/126)**. **F1 (vc 126)**: render/GlResources.h
-  NOVO — o GLResourceManager (a FONTE ÚNICA da lista de
-  invalidação/recriação; o ACHADO: o g_particles.destroy() FALTAVA na
-  lista manual do term da 0.6.7 — a camada F1 é posterior); as 8
-  camadas registadas no android_main; o term via invalidateAll(); o
-  boot [3/6]/[4/6] via recreateLayer() com o break do renderer
-  obrigatório preservado (o M-Z4 ao vivo: o for sem break deixava o
-  boot continuar SEM RENDER); cameraEnsureSane() no INIT/RESIZED/
-  RESUME (NaN → o padrão, a cena fica); editorRecalcHitCaches(). A
-  auditoria da fila UI→render: NÃO há corrida por construção (a UI é a
-  thread de render; o Java drena via pollResult/ImeQueue no topo do
-  frame). 0 FBOs (o item FBO/FBO-check do dono: nada a recriar —
-  documentado). pins ×2 + R-066 regress_glctx_fase1 + M-Z3/M-Z4.
+- **Campanha 0.12-Z (ANTI-PERDA DE CONTEXTO OPENGL + A SOMBRA) — F0..F2
+  FECHADAS (vc 125..127)**. **F2 (vc 127)**: a CAUSA RAIZ da sombra (o
+  fogDensity NaN PASSAVA pela clamp — comparações com NaN sempre falsas —
+  e envenenava a exp2 do lit FS: outColor NaN = o PRETO; §F2.1 do
+  relatório); a cura na FONTE (Environment::sane em TODOS os f32), a
+  névoa em highp + fogD·fogD (o pow em fp16 degenerava), a grelha com o
+  trio EXPLÍCITO (test ON, func LESS, write OFF), o depth func reposto à
+  entrada do 3D. pin env_sana_nan + R-067 + M-Z5. **F1 (vc 126)**: render/GlResources.h
+  NOVO — o GLResourceManager (a FONTE ÚNICA da recriação; o ACHADO: o
+  g_particles.destroy() FALTAVA na lista manual do term da 0.6.7); as 8
+  camadas no android_main; o term via invalidateAll(); o boot via
+  recreateLayer() com o break do renderer obrigatório (o M-Z4 ao vivo:
+  o for sem break deixava o boot continuar SEM RENDER);
+  cameraEnsureSane() no INIT/RESIZED/RESUME; editorRecalcHitCaches().
+  A fila UI→render: NÃO há corrida por construção. 0 FBOs. pins ×2 +
+  R-066 + M-Z3/M-Z4.
   **F0 (vc 125)** (a cláusula calma: SÓ o ciclo de vida GL/render +
   testes; UI visual, V.ONI, importadores, física e .gmesh INTACTOS; a
   história no RELATORIO-0.12-Z-GLCTX.md). **F0 (vc 125) — o
@@ -43,8 +46,7 @@ o GLResourceManager + a câmara sã; o RELATORIO-0.12-Z-GLCTX.md §F1);
   provável: presets sub-pixel — 0.015 m ≈ 1.3 px a 720p/7u; + o
   contexto perdido + o g_fxTime congelado + a origem no 0,0,0 + o NONE
   que silencia) — A DECISÃO DOS NOVOS TAMANHOS É DO DONO (tweak de
-  spec, fora da cláusula). 0 FBOs no motor (o toggle "pós" é no-op
-  documentado). pins ×4 (test_012z_ctx.cpp NOVO) + R-065
+  spec, fora da cláusula). 0 FBOs no motor. pins ×4 (test_012z_ctx.cpp NOVO) + R-065
   regress_glctx_fase0 + M-Z1/M-Z2 VERMELHAS AO VIVO. **SEGUEM**: F1 o
   GLResourceManager · F2 a origem da sombra + a ordem dos passes · F3
   as sondas por frame + o reset da interação · F4 os testes 20/20 —
