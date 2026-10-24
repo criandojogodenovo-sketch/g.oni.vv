@@ -9422,3 +9422,40 @@ TEST(regress_glctx_z2_fase1) {
                    "(inv0 + 1 — o salto é o bug)");
     }
 }
+
+// ---------------------------------------------------------------------------
+// R-071 — regress_sky_ground (0.12-Z2 F2): o BELOW-HORIZON é o TOM DE CHÃO —
+// o achado da FASE 0 no GLES REAL (a captura B5_we_meianoite.png: o
+// meio-plano inferior pintado com uHorizon = a «zona azul/escura fixa que
+// corta a grelha» do dono). A pura skyGradient e o FS do céu têm de
+// manter o MESMO par kGroundDim/kGroundFadeY (a réplica linha a linha é o
+// padrão da casa). A mutação (voltar ao clamp puro) fica VERMELHA aqui.
+// ---------------------------------------------------------------------------
+TEST(regress_sky_ground) {
+    {
+        std::string src;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/render/SkyRenderer.h", src));
+        EXPECT_MSG(src.find("kGroundDim") != std::string::npos &&
+                       src.find("kGroundFadeY") != std::string::npos &&
+                       src.find("0.12-Z2 F2") != std::string::npos,
+                   "R-071: o tom de chão saiu da pura skyGradient (a zona "
+                   "azul fixa volta ao meio-plano inferior)");
+    }
+    {
+        std::string src;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/render/SkyRenderer.cpp", src));
+        // o FS replica as MESMAS constantes (a réplica da pura)
+        EXPECT_MSG(src.find("kGroundDim   = 0.45") != std::string::npos &&
+                       src.find("kGroundFadeY = 0.18") != std::string::npos,
+                   "R-071: o FS do céu divergiu da pura (as constantes do "
+                   "chão têm de ser as MESMAS — o padrão Pbr.h)");
+        EXPECT_MSG(src.find("vec3 sky = uHorizon + (uZenith - uHorizon) * t;")
+                           != std::string::npos &&
+                       src.find("sstep(0.0, -kGroundFadeY, dir.y)") !=
+                           std::string::npos,
+                   "R-071: o FS deixou de misturar o tom de chão (a "
+                   "réplica linha a linha morreu)");
+    }
+}

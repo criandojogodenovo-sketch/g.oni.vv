@@ -182,7 +182,8 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
     // (a linha «Plataforma» vive nas Definições) — a degradação é a
     // escada k do flex com o piso 0.55 (a banda <580dp é a degradação
     // documentada: o editor é paisagem-first; o relatório diz)
-    const f32 nIcon = 7;   // undo/redo/save/play/stop/gear + logo
+    const f32 nIcon = 8;   // camReset/undo/redo/save/play/stop/gear + logo
+                           // (0.12-Z2 F2: o ⌖ Repor câmara entrou no grupo)
     f32 natFlex = kMenuW() + theme::dp(4.0f) + kCenaW() + 3.0f * kTabW();
     const f32 natW = natFlex + nIcon * kIconBtn() + 2.0f * theme::dp(8.0f);
     auto scaleK = [&](f32 flexW) {
@@ -202,6 +203,7 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
     L.logo.w  = kIconBtn();
     // os botões de ÍCONE nunca encolhem (o piso 40dp da casa)
     L.undo.w = L.redo.w = L.save.w = kIconBtn();
+    L.camReset.w = kIconBtn();
     L.play.w = L.stop.w = L.gear.w = kIconBtn();
     L.iconSize = kIconS();
 
@@ -231,6 +233,11 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
     place(L.redo, rgx);          rgx -= theme::dp(8.0f);
     rgx -= L.undo.w;
     place(L.undo, rgx);
+    // 0.12-Z2 F2: o ⌖ Repor câmara — o MAIS À ESQUERDA do grupo da direita
+    // (o pedido do dono; o mesmo caminho do cameraEnsureSane)
+    rgx -= theme::dp(8.0f);
+    rgx -= L.camReset.w;
+    place(L.camReset, rgx);
 
     // ---- centro: as tabs [3D][UI][ÁUDIO] — centradas na BARRA; se não
     // couberem entre a esquerda e a direita, comprimem-se ao espaço útil ----
@@ -389,6 +396,11 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
     // FASE UI B — a direita NOVA: desfazer/refazer/guardar (subiram do
     // viewport) + play/stop/gear. O desativado (sem histórico) desenha o
     // glifo a 0.35 e o toque segue para o toast honesto do main.
+    // 0.12-Z2 F2: o ⌖ Repor câmara (o pedido do dono; o glifo Reset — a
+    // seta circular que já repõe os valores do Transform)
+    if (iconButton(ui, kTbCamResetId, L.camReset, icons::Icon::Reset)) {
+        a.camResetPressed = true;
+    }
     if (iconButton(ui, kTbUndoId, L.undo, icons::Icon::Undo, false,
                    st.canUndo)) {
         a.undoPressed = true;
@@ -428,6 +440,7 @@ Actions draw(UiContext& ui, EditorState& st) {
     a.undoPressed  = t.undoPressed;
     a.redoPressed  = t.redoPressed;
     a.savePressed  = t.savePressed;
+    a.camResetPressed = t.camResetPressed;
     a.playPressed  = t.playPressed;
     a.stopPressed  = t.stopPressed;
     a.gearPressed  = t.gearPressed;

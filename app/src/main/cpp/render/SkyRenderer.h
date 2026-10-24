@@ -113,16 +113,28 @@ inline f32 cloudAlpha(f32 n, f32 coverage) {
     return sstep(t, t + kCloudSoft, n);
 }
 
-// o GRADIENTE: horizonte → zénite por dir.y (o clamp 0..1 — abaixo do
-// horizonte fica a cor do horizonte, o chão do quad é coberto pelo grid)
+// o GRADIENTE: horizonte → zénite por dir.y (o clamp 0..1). 0.12-Z2 F2
+// (o ACHADO da FASE 0 no GLES REAL — a captura B5_we_meianoite.png): o
+// abaixo-do-horizonte ficava na COR DO HORIZONTE — o meio-plano inferior
+// era uma ZONA AZUL/ESCURA FIXA que «cortava» a grelha (o sintoma do
+// dono). AGORA: abaixo do horizonte o céu escurece para o TOM DE CHÃO
+// (o horizonte × kGroundDim) com a transição suave de kGroundFadeY — a
+// linha do horizonte FICA VISÍVEL e a grelha nunca «afunda» num azul fixo.
+inline constexpr f32 kGroundDim   = 0.45f;  // o tom de chão (o horizonte ×)
+inline constexpr f32 kGroundFadeY = 0.18f;  // a meia-largura da transição
 inline void skyGradient(f32 dirY, const f32 hor[3], const f32 zen[3],
                         f32 out[3]) {
     f32 t = dirY;
     if (t < 0.0f) t = 0.0f;
     if (t > 1.0f) t = 1.0f;
-    out[0] = hor[0] + (zen[0] - hor[0]) * t;
-    out[1] = hor[1] + (zen[1] - hor[1]) * t;
-    out[2] = hor[2] + (zen[2] - hor[2]) * t;
+    f32 sky[3] = {hor[0] + (zen[0] - hor[0]) * t,
+                  hor[1] + (zen[1] - hor[1]) * t,
+                  hor[2] + (zen[2] - hor[2]) * t};
+    // o peso do CHÃO: 0 acima do horizonte → 1 a dir.y = -kGroundFadeY
+    f32 g = sstep(0.0f, -kGroundFadeY, dirY);
+    out[0] = sky[0] + (hor[0] * kGroundDim - sky[0]) * g;
+    out[1] = sky[1] + (hor[1] * kGroundDim - sky[1]) * g;
+    out[2] = sky[2] + (hor[2] * kGroundDim - sky[2]) * g;
 }
 
 // o DISCO do sol (a penumbra kSunCosSoft — uma aresta dura no sol é feia)

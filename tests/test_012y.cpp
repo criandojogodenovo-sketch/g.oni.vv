@@ -917,10 +917,28 @@ TEST(env_sky_type) {
                        nearEq(out[1], zen[1], 1e-5f) &&
                        nearEq(out[2], zen[2], 1e-5f),
                    "env_sky_type: dir.y=1 devia ser a cor do ZÉNITE");
-        sky::skyGradient(-0.5f, hor, zen, out);   // abaixo do horizonte
+        // 0.12-Z2 F2: abaixo do horizonte o céu escurece para o TOM DE
+        // CHÃO (o horizonte × kGroundDim no fundo da transição) — a «zona
+        // azul fixa que corta a grelha» do dono morreu (o ACHADO da FASE 0
+        // no GLES REAL, captura B5_we_meianoite.png); em dir.y=0 é ainda o
+        // HORIZONTE (a linha do horizonte fica onde sempre esteve)
+        sky::skyGradient(0.0f, hor, zen, out);
         EXPECT_MSG(out[1] == hor[1],
-                   "env_sky_type: abaixo do horizonte fica o HORIZONTE "
-                   "(o clamp 0..1 morreu)");
+                   "env_sky_type: dir.y=0 é o HORIZONTE (a linha do "
+                   "horizonte não mexeu)");
+        sky::skyGradient(-0.5f, hor, zen, out);   // abaixo do horizonte
+        EXPECT_MSG(out[1] < hor[1] - 0.01f,
+                   "env_sky_type: abaixo do horizonte ESCURECE (o tom de "
+                   "chão — a zona azul fixa morreu; kGroundDim=0.45)");
+        {
+            f32 deep[3];
+            sky::skyGradient(-10.0f, hor, zen, deep);
+            EXPECT_MSG(nearEq(deep[0], hor[0] * 0.45f, 1e-5f) &&
+                           nearEq(deep[1], hor[1] * 0.45f, 1e-5f) &&
+                           nearEq(deep[2], hor[2] * 0.45f, 1e-5f),
+                       "env_sky_type: o fundo do chão é horizonte×0.45 "
+                       "(kGroundDim)");
+        }
         sky::skyGradient(0.5f, hor, zen, out);
         EXPECT_MSG(nearEq(out[0], (hor[0] + zen[0]) * 0.5f, 1e-5f),
                    "env_sky_type: o meio do gradiente é o MIX 0.5");

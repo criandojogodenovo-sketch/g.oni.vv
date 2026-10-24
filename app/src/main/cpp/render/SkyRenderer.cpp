@@ -54,6 +54,9 @@ const float kSunCosSoft  = 0.0004;
 const float kSunGlowPow  = 24.0;
 const float kSunGlowGain = 0.35;
 const float kHorizonFadeY = 0.15;
+// 0.12-Z2 F2 — o TOM DE CHÃO (as MESMAS constantes da pura SkyRenderer.h)
+const float kGroundDim   = 0.45;
+const float kGroundFadeY = 0.18;
 const float kCloudShadow  = 0.75;
 const float kCloudLight   = 0.25;
 const float kCloudSunMix  = 0.35;
@@ -141,9 +144,14 @@ void main() {
                               + vNdc.y * uTanF * uUp);
     // o GRADIENTE (a réplica de sky::skyGradient) — as cores chegam JÁ
     // GRADUADAS pelo CPU (a grade dia/noite corre 1× por frame, nunca por
-    // pixel — a otimização do C33 no relatório 0.12-Y-E-SKY)
+    // pixel — a otimização do C33 no relatório 0.12-Y-E-SKY).
+    // 0.12-Z2 F2: o abaixo-do-horizonte escurece para o TOM DE CHÃO (a
+    // réplica EXATA da pura — a «zona azul fixa» do dono morre aqui; a
+    // mesma kGroundDim/kGroundFadeY e o MESMO sstep)
     float t = clamp(dir.y, 0.0, 1.0);
-    vec3 col = uHorizon + (uZenith - uHorizon) * t;
+    vec3 sky = uHorizon + (uZenith - uHorizon) * t;
+    float g = sstep(0.0, -kGroundFadeY, dir.y);
+    vec3 col = sky + (uHorizon * kGroundDim - sky) * g;
     // o HALO antes das nuvens (atravessa o véu fino)
     float d = dot(dir, uSunDir);
     col += uSunCol * sunGlow(d);

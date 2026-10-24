@@ -929,3 +929,22 @@ falha SEMPRE). O fix: o invalidate corre SEMPRE (idempotente por contrato)
 regress_glctx_z2_fase1 · test_core 0 falhas · c33_virtual 1113/0 ·
 raster_z2 --fuzz 1050/0 · gates VERDES · **versionCode 131** — o par
 declarado aqui e no build config.
+
+### §14-v — 0.12-Z2 F2 (o tom de chão + o varrimento + o ⌖) — versionCode 132
+
+**G8** (o par declarado no MESMO commit, a regra do §14): a FASE 2 da
+campanha Z2 (o RELATORIO-0.12-Z2-RASTER.md §F2): o below-horizon do céu
+tinha o clamp `t=clamp(dir.y,0,1)` que pintava o meio-plano INFERIOR com a
+cor do horizonte (a «zona azul/escura fixa que corta a grelha» do dono) —
+a cura: o TOM DE CHÃO (horizonte×0.45 com a transição 0.18) na pura
+skyGradient e no FS (a réplica linha a linha). O VARRIMENTO DE CÂMARA
+(--sky2): 400 renders (200 poses × WE on/off — as bordas ±5000/±89°/dist
+0.05..8000) — a grelha INTEIRA em todos (o pior pose 403 linhas) e ZERO
+pixels pretos (0.00%); a GRELHA IMUNE à névoa (0 px mudam com fog 0→0.12).
+A CÂMARA NUNCA PRESA: o ⌖ «Repor câmara» na barra (o glifo Reset) + o
+duplo toque no vazio + a cameraEnsureSane que já existia — os dois
+primeiros PROVADOS por input real no GLES. O VLM (createVision) confirma
+as capturas. pin env_sky_type no contrato novo · sentinela
+regress_sky_ground (R-071) · test_core 0 falhas · c33_virtual 1113/0 ·
+--sky2 200/0 · gates VERDES · **versionCode 132** — o par declarado aqui
+e no build config.

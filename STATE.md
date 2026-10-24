@@ -1,8 +1,7 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-24 · vc: 131 · Último commit: este (a 0.12-Z2 F1 —
-o fuzzing do contexto no GLES REAL + o R-070; o RELATORIO-0.12-Z2-RASTER.md
-§F1);
+Atualizado: 2026-10-24 · vc: 132 · Último commit: este (a 0.12-Z2 F2 —
+o tom de chão + o varrimento + o ⌖; o RELATORIO-0.12-Z2-RASTER.md §F2);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -21,7 +20,13 @@ o fuzzing do contexto no GLES REAL + o R-070; o RELATORIO-0.12-Z2-RASTER.md
   a mono no OEM enxuto falha SEMPRE) — o invalidate corre SEMPRE
   (idempotente). pin do term duplo (inv0+6) + sentinela
   regress_glctx_z2_fase1 + REGRESSOES.md. test_core 0 · c33 1113/0.
-  **F0 (vc 130)**: o raster_z2 — a engine contra o DRIVER GLES REAL
+  **F2 (vc 132)**: o below-horizon do céu tinha o clamp que pintava o
+  meio-plano inferior com uHorizon (a «zona azul/escura fixa») — o TOM DE
+  CHÃO (horizonte×0.45, transição 0.18) na pura + no FS (R-071); o
+  VARRIMENTO --sky2 200×2 (a grelha inteira, 0.00% preto; a grelha IMUNE
+  à névoa — 0 px); a CÂMARA NUNCA PRESA (o ⌖ na barra + o duplo toque no
+  vazio, ambos PROVADOS por input real; a cameraEnsureSane mantém-se).
+  pin env_sky_type novo + R-071. **F0 (vc 130)**: o raster_z2 — a engine contra o DRIVER GLES REAL
   (Mesa/llvmpipe 25.0.7, ES 3.2, EGL pbuffer; o shim é o ÚNICO desvio do
   header canónico). A grelha/o céu/o cubo/o gizmo/a UI PROVADOS em
   PIXELS (27 checks/0; fwidth corre). Os 4 sintomas com captura ANTES:

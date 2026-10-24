@@ -269,3 +269,139 @@ recuperação.**
 | O layout deslocado pós-perda é bug da engine | REFUTADO | eram duas instâncias de android_app no HARNESS (o log [boot 1/6] com insets T0 R0) |
 | O frame seguinte é idêntico COM gesto durante a perda | PROVADO | os ciclos com gesto (1/8 dos 1050) exatos |
 | A recuperação <1s (o critério da 0.12-Z) no GLES real | PROVADO | o ciclo corre DENTRO de 1 frame (o c33 F4 já o aferrava; o fuzz corre o mesmo caminho) |
+
+---
+
+# §F2 — O CÉU, A GRELHA E A CÂMARA (FASE 2-Z2)
+
+## F2-Z2.1 — COMO O CÉU É DESENHADO HOJE (o relatório pedido, ficheiro:linha)
+
+**PROVADO** (lido no fonte + provado no GLES real na FASE 0): o céu É
+desde a 0.12-Y **UM passe em ecrã inteiro** — o quad NDC de 4 vértices
+(`render/SkyRenderer.cpp`, kQuadCorners, z/w=1.0), a direção reconstruída
+da base da view SEM translação (kFsSrc: `dir = normalize(uFwd + ndc.x·
+aspect·tanF·uRight + ndc.y·tanF·uUp)`), depth test/write OFF, blend OFF,
+desenhado PRIMEIRO (main.cpp:6106, o gate `skyCyc && g_sky.ok() &&
+showSky`). Nunca houve geometria fixa no mundo — o pedido 2.2 do dono JÁ
+estava cumprido na forma; o defeito era o CONTEÚDO abaixo do horizonte
+(F2-Z2.2). A ordem do frame (limpar → céu → geometria → partículas →
+grelha → gizmos → UI) está aferrada pela bisseção da F0-Z2.4.
+
+## F2-Z2.2 — O ACHADO E O FIX: O TOM DE CHÃO (a «zona azul/escura fixa» morre)
+
+- **ANTES (PROVADO, captura docs/capturas-0.12-Z2/B5_we_meianoite.png)**: o
+  FS fazia `t = clamp(dir.y, 0, 1)` e pintava TODO o meio-plano inferior <!-- docs-lint:allow -->
+  com a cor do horizonte — de dia um azul fixo, de noite um azul-escuro
+  fixo — a «zona» que o dono vê «cortar» a grelha (a grelha desenha por
+  cima, mas o FUNDO não distinguia chão de céu).
+- **DEPOIS (PROVADO, captura S2_meianoite_depois.png)**: a pura
+  `sky::skyGradient` (render/SkyRenderer.h) e o FS (a réplica linha a
+  linha, as MESMAS constantes kGroundDim=0.45/kGroundFadeY=0.18) escurecem
+  o abaixo-do-horizonte para horizonte×0.45 com a transição suave de
+  0.18 — a LINHA DO HORIZONTE fica visível e o chão deixa de ser uma zona
+  fixa. O VLM (z-ai-web-dev-sdk createVision) sobre a captura DEPOIS: «a
+  grelha 3D está visível e estende-se por toda a área… não há nenhuma
+  zona escura ou azul fixa que corte ou sobreponha à grelha… a linha do
+  horizonte é claramente visível».
+- O pin `env_sky_type` (tests/test_012y.cpp) atualizado ao contrato novo
+  (dir.y=0 segue o HORIZONTE; dir.y=-10 = horizonte×0.45 exato) + a
+  sentinela **R-071** `regress_sky_ground` (a pura e o FS com as MESMAS
+  constantes — a mutação do clamp puro fica vermelha).
+
+## F2-Z2.3 — O VARRIMENTO DE CÂMARA (o pedido: ≥200 poses, por pixel)
+
+`raster_z2 --sky2 200` (PROVADO, exit 0):
+- **400 renders** (200 poses × 2 variantes: WE procedural / SEM WE — o HDRI
+  é AMBIENTE CPU no motor (o equirect ilumina, não pinta o céu — a falha
+  de import nunca pode pintar o ecrã; o caminho é o mesmo das variantes).
+- As poses: as 12 BORDAS fixas (pitch ±89°, dist 0.05/300/8000, os cantos
+  ±5000, POR BAIXO da grelha target y=-50) + 188 pseudo-aleatórias
+  (determinísticas, seed fixa).
+- O veredicto por pixel por pose: as linhas da grelha presentes na metade
+  do chão (o pior pose = 403 pixels de linha) e ZERO pixels pretos puros
+  (o pior = 0.00% — nenhuma zona escura corta nada).
+- As capturas de prova: S2_v0_p00/p02/p04/p06, S2_v1_p02… (o ⌖ e o VLM
+  confirmam; a nota honesta: nas poses dist 0.05 a câmara está DENTRO do
+  plano da grelha — o VLM lê «a grelha não está visível nesta vista» e os
+  eixos/eixos-cruz estão; o critério é a grelha INTEIRA onde ela é visível,
+  sem zona a cortá-la).
+
+## F2-Z2.4 — A IMUNIDADE DA GRELHA (o pedido 2.4)
+
+`raster_z2 --sky2`: névoa 0.00 → 0.12 com o MESMO pose/frame congelado:
+**0 pixels de LINHA mudaram** — a grelha do editor é IMUNE ao
+WorldEnvironment/névoa (a grelha desenha no seu shader sem uFog; o
+abafamento próprio da grelha é o fade por distância dela, não do WE). Os
+gizmos desenham DEPOIS da grelha sem depth test (a bisseção F0-Z2.4) —
+nunca tocados pelo céu.
+
+## F2-Z2.5 — A CÂMARA NUNCA PRESA (o pedido 2.8)
+
+1. **O botão ⌖ «Repor câmara»** na barra (Toolbar.h kTbCamResetId=23, o
+   glifo Reset que já existia; Toolbar.cpp topbarLayout nIcon 7→8 + o
+   draw; main.cpp consome `ta.camResetPressed` → `cameraResetToDefault()`
+   + o toast + a linha na Consola). **PROVADO por input real no GLES**:
+   `raster_z2 --sky2` injeta o toque no rect do topbarLayout → a câmara
+   volta byte a byte ao padrão.
+2. **O duplo toque no vazio** (main.cpp, o detector 2 toques <350ms e
+   <32dp no backdrop do viewport) → o MESMO cameraResetToDefault.
+   **PROVADO por input real**.
+3. **A reposição automática** já existia e mantém-se:
+   `cameraEnsureSane()` (main.cpp:1067) no INIT/RESIZED/RESUME — NaN/fora
+   dos limites → o padrão + o aviso na Consola («camera: estado inválido…
+   a câmara repõe o PADRÃO»).
+4. Os limites da órbita (os clamps de sempre pitch ±89°, dist
+   0.01..100000) mantêm-se — o varrimento provou que nenhum pose legal
+   deixa o render morto.
+
+## F2-Z2.6 — O RELATÓRIO DE 16 ITENS (FASE 2-Z2)
+
+1. **Objetivo**: o céu abaixo do horizonte (a zona fixa), a imunidade da
+   grelha, o varrimento de câmara e a câmara nunca presa.
+2. **Causa raiz (ficheiro:linha)**: SkyRenderer.h skyGradient + SkyRenderer.cpp
+   kFsSrc — o clamp `t=clamp(dir.y,0,1)` pintava o meio-plano inferior com
+   uHorizon.
+3. **Sintomas cobertos**: (a) a zona azul/escura fixa que «corta» a grelha;
+   (c) a câmara perdida (os 3 caminhos de reposição).
+4. **O que mudou**: render/SkyRenderer.{h,cpp} (o tom de chão), ui/Toolbar.{h,cpp}
+   (o ⌖), platform/main.cpp (o consumo + o duplo toque + o helper), os pins
+   (env_sky_type) + a sentinela R-071.
+5. **O que NÃO foi tocado**: V.ONI, importadores, física, .gmesh, o layout
+   dos painéis (o ⌖ entrou no grupo da direita que já existia).
+6. **A ordem dos passes**: intacta (aferrada na F0-Z2.4).
+7. **O céu segue a spec do dono**: UM passe fullscreen, direção da view sem
+   translação, depth OFF, desenhado primeiro (F2-Z2.1) — agora com o chão.
+8. **A grelha**: imune à névoa PROVADO (0 px); o far/fade próprios mantêm-se.
+9. **O WorldEnvironment**: os campos sane (a 0.12-Z F2 mantém-se — o pin
+   env_sana_nan verde); o HDRI é AMBIENTE CPU (a falha nunca pinta o ecrã).
+10. **A precisão**: a névoa/posições em highp (a 0.12-Z F2; o pin existe).
+    O teste «forçar mediump e comparar» NÃO VERIFICADO no hospedeiro — o
+    llvmpipe é fp32 sempre (PROVADO pela spec do driver); entra na
+    VERIFICAÇÃO NO DISPOSITIVO (o Mali GE8320 fp16).
+11. **Testes**: test_core 0 falhas (o pin novo) · c33_virtual 1113/0 ·
+    raster_z2 --sky2 200 (exit 0) · R-071 verde.
+12. **Mutações**: o clamp puro de volta → R-071 VERMELHO; o salto do
+    place do ⌖ → o pin do layout? (o botão é provado por INPUT no harness —
+    a mutação do id/nome é apanhada pelo check do pick).
+13. **Capturas**: S2_v0_p00/p04, S2_v1_p02, S2_meianoite_depois (docs/).
+14. **O VLM**: as respostas colaadas em F2-Z2.2/F2-Z2.3 (createVision).
+15. **Riscos**: o tom de chão muda TODAS as capturas com céu procedural
+    (as golden images da FASE 5 nascem DEPOIS deste commit); o ⌖ rouba
+    ~40dp à flexão da barra (o layout encolhe Menu/Cena/tabs — o caminho
+    da escala graciosa existente).
+16. **Próximo passo**: FASE 3-Z2 — os TICs de clima (o tamanho mínimo em
+    píxeis, o emissor a seguir a câmara, as provas por render).
+
+## TABELA DE RÓTULOS (FASE 2-Z2)
+
+| Afirmação | Rótulo | Prova |
+|---|---|---|
+| A «zona azul/escura fixa» era o clamp do below-horizon no FS do céu | PROVADO | F0-Z2.3 (B1/B2/C_sem_ceu) + o código |
+| O tom de chão elimina a zona fixa e a linha do horizonte fica visível | PROVADO | S2_meianoite_depois.png + o VLM + o pin dir.y=-10 = 0.45× |
+| A grelha é IMUNE à névoa/WE | PROVADO | 0 pixels de linha mudaram (fog 0→0.12) |
+| A grelha está inteira em 200 poses × 2 variantes | PROVADO | --sky2 200 exit 0 (o pior pose 403 linhas, 0.00% preto) |
+| O ⌖ da barra repõe a câmara por input real | PROVADO | --sky2 (o tap no rect do topbarLayout) |
+| O duplo toque no vazio repõe a câmara por input real | PROVADO | --sky2 |
+| A reposição automática NaN/limites avisa na Consola | PROVADO | cameraEnsureSane (main.cpp:1067, o elog::warn) + o c33 |
+| O céu HDRI pinta o ecrã | REFUTADO (não existe — é AMBIENTE CPU) | o código (a média CPU ilumina o lit; o céu é clear/procedural) — a falha de import nunca pode pintar o ecrã |
+| O teste mediump-forçado (fp16) | NÃO VERIFICADO | o llvmpipe é fp32 (a spec do driver) — entra na VERIFICAÇÃO NO DISPOSITIVO |

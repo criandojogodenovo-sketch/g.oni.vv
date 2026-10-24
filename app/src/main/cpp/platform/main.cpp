@@ -1064,6 +1064,20 @@ void glResourcesRegister() {
 // câmara — sem NaN, distância nos limites; se inválida, repor o padrão
 // SEM apagar a cena). O zoomBy/pan/orbit do input podem ter deixado o
 // estado degenerado num term a meio do gesto; o resume SANA.
+// 0.12-Z2 F2 (o pedido do dono): o «Repor câmara» — a órbita volta ao
+// PADRÃO (o MESMO caminho do cameraEnsureSane; o botão ⌖ da barra e o
+// DUPLO TOQUE no vazio da viewport chegam aqui; o aviso vai à Consola)
+void cameraResetToDefault(const char* origem) {
+    const Camera fresh;
+    g_camera.target = fresh.target;
+    g_camera.yaw = fresh.yaw;
+    g_camera.pitch = fresh.pitch;
+    g_camera.dist = fresh.dist;
+    g_camera.fovY = fresh.fovY;
+    elog::info("camera: reposta ao padrão (%s)", origem);
+    showToast("câmara reposta");
+}
+
 void cameraEnsureSane() {
     const bool bad = !std::isfinite(g_camera.target.x) ||
                      !std::isfinite(g_camera.target.y) ||
@@ -5621,6 +5635,10 @@ u32 feedTouchControls(f32 w, f32 h, bool& outDrawn, TouchControls** outTc) {
 f32    g_fps = 0.0f;
 double g_fpsAccum = 0.0;
 u32    g_fpsFrames = 0;
+// 0.12-Z2 F2: o detector do DUPLO TOQUE no vazio (o Repor câmara)
+double s_lastEmptyTapT = 0.0;
+f32    s_lastEmptyTapX = 0.0f;
+f32    s_lastEmptyTapY = 0.0f;
 
 void onAppCmd(android_app* app, i32 cmd) {
     switch (cmd) {
@@ -7242,6 +7260,24 @@ void frame() {
                                velho ? velho->name.c_str() : "ID órfão");
                 }
                 editor::clearSelection(g_editor);
+                // 0.12-Z2 F2 (o pedido do dono): o DUPLO TOQUE no vazio
+                // repõe a câmara (2 toques <350ms e <32dp de distância —
+                // o mesmo gesto do sistema; o botão ⌖ da barra é o outro
+                // caminho; a reposição automática é a cameraEnsureSane)
+                const double nowTap = nowSeconds();
+                const f32 dx = px - s_lastEmptyTapX;
+                const f32 dy = py - s_lastEmptyTapY;
+                if (s_lastEmptyTapT > 0.0 &&
+                    (nowTap - s_lastEmptyTapT) < 0.35 &&
+                    (dx * dx + dy * dy) <
+                        theme::dp(32.0f) * theme::dp(32.0f)) {
+                    cameraResetToDefault("o duplo toque no vazio");
+                    s_lastEmptyTapT = 0.0;
+                } else {
+                    s_lastEmptyTapT = nowTap;
+                    s_lastEmptyTapX = px;
+                    s_lastEmptyTapY = py;
+                }
             }
         }
     }
@@ -7846,6 +7882,10 @@ void frame() {
             // 0.9.0 (spec I): o gear abre a PÁGINA de Settings
             g_editor.settingsMenu = true;
             elog::info("ui: pagina de settings aberta (gear)");
+        }
+        if (ta.camResetPressed) {
+            // 0.12-Z2 F2: o ⌖ da barra — a câmara volta ao padrão
+            cameraResetToDefault("o botão da barra");
         }
 
         // 0.12-Z F0 — O ISOLAMENTO DA UI: com o passe mascarado, SÓ a

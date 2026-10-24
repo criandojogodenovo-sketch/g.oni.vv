@@ -73,6 +73,10 @@ constexpr u64 kTbStopId      = 18;
 constexpr u64 kTbUndoId      = 20;
 constexpr u64 kTbRedoId      = 21;
 constexpr u64 kTbSaveId      = 22;
+// 0.12-Z2 F2 (o pedido do dono: «botão "Repor câmara" na viewport»): o
+// ⌖ da barra — repõe a órbita ao padrão (o MESMO caminho do
+// cameraEnsureSane; o duplo toque no vazio da viewport faz o mesmo)
+constexpr u64 kTbCamResetId  = 23;
 
 // ---- A BARRA ÚNICA (40dp — FASE UI B, A ORDEM DO DONO) ------------------------
 // 0.9.6.10 (GRUPO UI · a região TOPO da imagem 1): [G logo][≡ Menu]
@@ -92,6 +96,8 @@ struct TopBarLayout {
     UiRect underline{};           // do tab ATIVO (2dp brasa, fundo da barra)
     u32    active = 0;            // 0=3D, 1=UI, 2=ÁUDIO
     UiRect undo{}, redo{}, save{};  // direita (FASE UI B — subiram do viewport)
+    UiRect camReset{};              // 0.12-Z2 F2: o ⌖ Repor câmara (o mais à
+                                    // esquerda do grupo da direita)
     UiRect play{}, stop{};          // direita (ícones — ▶■)
     UiRect gear{};                // extrema direita (ancorado)
     f32    iconSize = 24.0f;      // 20dp dentro dos alvos da linha (PASSO 1)
@@ -109,6 +115,7 @@ struct TopBarActions {
     bool undoPressed  = false;    // FASE UI B: subiram do viewport
     bool redoPressed  = false;
     bool savePressed  = false;
+    bool camResetPressed = false; // 0.12-Z2 F2: o ⌖ da barra (repor câmara)
     bool playPressed  = false;
     bool stopPressed  = false;    // 0.9.6.10: o ■ explícito (sai do play)
     bool gearPressed  = false;    // abre a página de Settings (spec I)
@@ -128,6 +135,7 @@ struct Actions {
     bool undoPressed  = false;
     bool redoPressed  = false;
     bool savePressed  = false;
+    bool camResetPressed = false; // 0.12-Z2 F2: o ⌖ da barra (repor câmara)
     bool playPressed  = false;
     bool stopPressed  = false;
     bool gearPressed  = false;

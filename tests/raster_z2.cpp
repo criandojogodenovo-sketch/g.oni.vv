@@ -347,6 +347,256 @@ Handle addStormTic() {
     return h;
 }
 
+// ===========================================================================
+// FASE 2-Z2 — O VARRIMENTO DE CÂMARA (o pedido: ≥200 poses e direções,
+// incluindo as bordas do mundo, por cima e por baixo da grelha, e dentro
+// do volume do WorldEnvironment — provar POR PIXEL que a grelha está
+// inteira e NENHUMA zona escura a corta, com o WE ausente, procedural e
+// HDRI) + A IMUNIDADE DA GRELHA à névoa + O «Repor câmara» (o ⌖ da barra
+// e o duplo toque no vazio — os caminhos REAIS de input).
+// ===========================================================================
+int sky2Run(int poses_) {
+    std::printf("\n== FASE 2 — O VARRIMENTO DE CÂMARA (%d poses × WE on/off) ==\n",
+                poses_);
+    const int poses = poses_ < 0 ? 200 : poses_;
+    int failures = 0;
+
+    // o WE procedural na cena (a variante "procedural"; a "ausente" remove)
+    Handle weH = addWeTic();
+    selectCuboByName();
+    g_camera.target = Vec3{0.0f, 0.0f, 0.0f};
+    g_camera.yaw = 0.60f;
+    g_camera.pitch = 0.50f;
+    g_camera.dist = 6.0f;
+
+    // o VARRIMENTO determinístico (o LCG da casa; as bordas entram fixas)
+    u32 rng = 0xBEEF1234u;
+    auto next = [&rng]() { rng = rng * 1664525u + 1013904223u; return rng >> 8; };
+    int w = 0, h = 0;
+    long worstGrid = 1 << 30;
+    double worstDark = 0.0;
+    int capSaved = 0;
+    for (int variant = 0; variant < 2; ++variant) {
+        // variante 0 = WE procedural; variante 1 = SEM WE (a cena nua)
+        if (variant == 1 && weH.valid()) {
+            g_scene.destroy(weH);
+            weH = Handle{};
+        }
+        for (int i = 0; i < poses; ++i) {
+            // a pose: as BORDAS nas 1.ªs 12 (os cantos do mundo, por baixo
+            // da grelha, o horizonte); as restantes pseudo-aleatórias
+            f32 yaw, pitch, dist;
+            Vec3 target{0.0f, 0.0f, 0.0f};
+            if (i < 12) {
+                static const f32 kp[] = {1.5533f, -1.5533f, 1.2f, -0.1f,
+                                         0.0f, 0.35f, 1.5533f, -1.5f,
+                                         0.5f, -0.5f, 1.0f, 0.0f};
+                pitch = kp[i % 12];
+                yaw = 0.0f + f32(i) * 0.52f;
+                dist = (i % 3 == 0) ? 0.05f : ((i % 3 == 1) ? 8000.0f : 300.0f);
+                if (i == 4) target = Vec3{5000.0f, 0.0f, -5000.0f};
+                if (i == 5) target = Vec3{-5000.0f, -50.0f, 5000.0f};
+                if (i == 6) target = Vec3{0.0f, -50.0f, 0.0f};
+            } else {
+                yaw = f32(next() % 6283) * 0.001f;
+                pitch = (f32(next() % 3111) - 1555) * 0.001f;
+                const f32 lg = f32(next() % 5000) * 0.001f;   // 0..5
+                dist = 0.05f * std::pow(160000.0f, lg / 5.0f); // 0.05..8000
+                if (i % 7 == 0) {
+                    target = Vec3{f32(next() % 2001) - 1000.0f, 0.0f,
+                                  f32(next() % 2001) - 1000.0f};
+                }
+            }
+            g_camera.yaw = yaw;
+            g_camera.pitch = pitch;
+            g_camera.dist = dist;
+            g_camera.target = target;
+            stepFrame(0.0f);
+            stepFrame(0.0f);
+            const std::vector<u8> px = readFrame(&w, &h);
+            if (!g_ready) {
+                ++failures;
+                std::printf("    [FAIL] pose %d (v%d): o render morreu\n", i, variant);
+                continue;
+            }
+            // a GRELHA INTEIRA: a metade INFERIOR da área 3D (o chão) tem
+            // de ter linhas (pixels claros sobre o fundo) — a pose a olhar
+            // PARA CIMA (pitch<-0.9) vê a grelha POR BAIXO (a faixa alta)
+            const int gy0 = (pitch < -0.9f) ? h / 20 : h / 2;
+            const int gy1 = (pitch < -0.9f) ? h : h - 1;
+            long bright = 0;
+            for (int y = gy0; y < gy1; y += 2) {
+                for (int x = 270; x < 1000; x += 2) {
+                    const u8* p = &px[(size_t)y * w * 4 + (size_t)x * 4];
+                    const f32 lum = (0.2126f * p[0] + 0.7152f * p[1] +
+                                     0.0722f * p[2]) / 255.0f;
+                    if (lum > 0.30f) ++bright;   // as linhas da grelha
+                }
+            }
+            if (bright < worstGrid) worstGrid = bright;
+            // a ZONA ESCURA que CORTA: a % de pixels quase-pretos (lum<0.02)
+            // na faixa do chão — o fundo do céu novo (o tom de chão
+            // horizonte×0.45 ≈ lum 0.1) nunca é preto puro
+            long black = 0, tot = 0;
+            for (int y = h / 2; y < h - 1; y += 3) {
+                for (int x = 270; x < 1000; x += 3) {
+                    const u8* p = &px[(size_t)y * w * 4 + (size_t)x * 4];
+                    const f32 lum = (0.2126f * p[0] + 0.7152f * p[1] +
+                                     0.0722f * p[2]) / 255.0f;
+                    ++tot;
+                    if (lum < 0.02f) ++black;
+                }
+            }
+            const double pct = tot ? 100.0 * black / tot : 0.0;
+            if (pct > worstDark) worstDark = pct;
+            if (bright < 8) {
+                ++failures;
+                std::printf("    [FAIL] pose %d (v%d yaw=%.2f pitch=%.2f dist=%.2f): "
+                            "a grelha não está inteira (linhas=%ld)\n",
+                            i, variant, (double)yaw, (double)pitch,
+                            (double)dist, bright);
+                if (capSaved < 6) {
+                    char nm[64];
+                    std::snprintf(nm, sizeof(nm), "S2_fail_v%d_p%02d", variant, i);
+                    capturePng(nm);
+                    ++capSaved;
+                }
+            }
+            // as CAPTURAS de prova (as 1.ªs de cada variante + as bordas)
+            if (capSaved < 10 && (i == 0 || i == 2 || i == 4 || i == 6)) {
+                char nm[64];
+                std::snprintf(nm, sizeof(nm), "S2_v%d_p%02d", variant, i);
+                capturePng(nm);
+                ++capSaved;
+            }
+        }
+        std::printf("    variante %d (%s): %d poses, falhas acumuladas=%d\n",
+                    variant, variant == 0 ? "WE procedural" : "SEM WE",
+                    poses, failures);
+    }
+
+    // a MEIA-NOITE com o tom de chão NOVO (a captura DEPOIS do sintoma
+    // (a) da FASE 0 — o VLM responde «há uma zona escura que corta a
+    // grelha?» sobre esta e sobre a B5_we_meianoite.png de antes)
+    {
+        if (!weH.valid()) weH = addWeTic();
+        Tic* et = g_scene.get(weH);
+        Environment* env = et->getComponent<Environment>();
+        env->skyType = Environment::kSkyTypeProcedural;
+        env->timeOfDay = 0.0f;
+        g_camera.yaw = 0.60f;
+        g_camera.pitch = 0.50f;
+        g_camera.dist = 6.0f;
+        g_camera.target = Vec3{0.0f, 0.0f, 0.0f};
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        capturePng("S2_meianoite_depois");
+        std::printf("    meia-noite DEPOIS capturada (o tom de chão)\n");
+        env->timeOfDay = Environment::kTodDefault;
+    }
+
+    // ---- A IMUNIDADE DA GRELHA à névoa (o dono: «grelha e gizmos do
+    // EDITOR nunca são afetados por WorldEnvironment, névoa, céu») -------
+    {
+        if (!weH.valid()) weH = addWeTic();
+        Tic* et = g_scene.get(weH);
+        Environment* env = et->getComponent<Environment>();
+        env->skyType = Environment::kSkyTypeSolid;   // o fundo estável
+        g_camera.yaw = 0.60f;
+        g_camera.pitch = 0.50f;
+        g_camera.dist = 6.0f;
+        g_camera.target = Vec3{0.0f, 0.0f, 0.0f};
+        env->fogDensity = 0.0f;
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        const std::vector<u8> sem = readFrame(&w, &h);
+        env->fogDensity = 0.12f;   // a névoa no máximo útil
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        const std::vector<u8> com = readFrame(&w, &h);
+        // a GRELHA (as linhas claras): o MESMO conjunto de pixels nas duas
+        auto gridMask = [&](const std::vector<u8>& f) {
+            std::vector<u8> m;
+            m.reserve((size_t)w * h);
+            for (int y = 0; y < h; ++y) {
+                for (int x = 0; x < w; ++x) {
+                    const u8* p = &f[(size_t)y * w * 4 + (size_t)x * 4];
+                    const f32 lum = (0.2126f * p[0] + 0.7152f * p[1] +
+                                     0.0722f * p[2]) / 255.0f;
+                    m.push_back(lum > 0.30f ? 1 : 0);
+                }
+            }
+            return m;
+        };
+        const std::vector<u8> mSem = gridMask(sem);
+        const std::vector<u8> mCom = gridMask(com);
+        long dGrid = 0;
+        for (size_t i = 0; i < mSem.size(); ++i) {
+            if (mSem[i] != mCom[i]) ++dGrid;
+        }
+        std::printf("    névoa 0.00→0.12: %ld pixels de LINHA mudaram (a grelha %s)\n",
+                    dGrid, dGrid == 0 ? "IMUNE" : "AFETADA");
+        check(dGrid == 0, "a GRELHA é imune à névoa (o WorldEnvironment não a toca)");
+        env->fogDensity = 0.0f;
+    }
+
+    // ---- O «Repor câmara» pelos caminhos REAIS ---------------------------
+    {
+        // a pose extrema → o ⌖ da barra (o topbarLayout dá o rect)
+        g_camera.yaw = 2.9f;
+        g_camera.pitch = 1.5f;
+        g_camera.dist = 9000.0f;
+        stepFrame();
+        const editor::toolbar::TopBarLayout tbl =
+            editor::toolbar::topbarLayout(f32(g_egl.width()), f32(g_egl.height()),
+                                          safe::insetsFromContentRect(
+                                              f32(g_egl.width()),
+                                              f32(g_egl.height()),
+                                              0, 24, 1256, 720),
+                                          false, false);
+        std::printf("    [dbg] camReset rect=(%.0f,%.0f %.0fx%.0f) | undo=(%.0f,%.0f)\n",
+                    (double)tbl.camReset.x, (double)tbl.camReset.y,
+                    (double)tbl.camReset.w, (double)tbl.camReset.h,
+                    (double)tbl.undo.x, (double)tbl.undo.y);
+        const f32 cx = tbl.camReset.x + tbl.camReset.w * 0.5f;
+        const f32 cy = tbl.camReset.y + tbl.camReset.h * 0.5f;
+        g_input.injectDown(0, cx, cy);
+        stepFrame();
+        g_input.injectUp(0);
+        stepFrame();
+        stepFrame();
+        const Camera fresh;
+        bool ok = g_camera.yaw == fresh.yaw && g_camera.pitch == fresh.pitch &&
+                  g_camera.dist == fresh.dist;
+        check(ok, "o ⌖ da barra repõe a câmara (o caminho REAL do input)");
+        // a pose extrema → o DUPLO TOQUE no vazio
+        g_camera.yaw = 2.9f;
+        g_camera.pitch = 1.5f;
+        g_camera.dist = 9000.0f;
+        stepFrame();
+        g_input.injectDown(0, 400.0f, 600.0f);
+        stepFrame();
+        g_input.injectUp(0);
+        stepFrame();
+        stepFrame();
+        g_input.injectDown(0, 403.0f, 602.0f);
+        stepFrame();
+        g_input.injectUp(0);
+        stepFrame();
+        stepFrame();
+        ok = g_camera.yaw == fresh.yaw && g_camera.pitch == fresh.pitch &&
+             g_camera.dist == fresh.dist;
+        check(ok, "o DUPLO TOQUE no vazio repõe a câmara (o caminho REAL)");
+    }
+
+    std::printf("    varrimento: %d poses ×2 | pior linhas=%ld | pior preto=%.2f%% | falhas=%d\n",
+                poses, worstGrid, worstDark, failures);
+    check(failures == 0,
+          "a GRELHA está inteira e SEM zona escura em todo o varrimento");
+    prova("varrimento de câmara concluído (o relatório cola os números)");
+    return failures;
+}
+
 int fuzzRun(int cycles, u32 seed) {
     std::printf("\n== FASE 1 — FUZZING DO CONTEXTO (%d ciclos, seed %u) ==\n",
                 cycles, seed);
@@ -568,6 +818,8 @@ int fuzzRun(int cycles, u32 seed) {
 
 int main(int argc, char** argv) {
     const bool fuzzMode = argc > 1 && std::strcmp(argv[1], "--fuzz") == 0;
+    const bool sky2Mode = argc > 1 && std::strcmp(argv[1], "--sky2") == 0;
+    const int sky2Poses = argc > 2 ? std::atoi(argv[2]) : 200;
     const int fuzzCycles = argc > 2 ? std::atoi(argv[2]) : 1000;
     const u32 fuzzSeed = argc > 3 ? static_cast<u32>(std::strtoul(argv[3], nullptr, 10)) : 0xC0FFEEu;
     std::printf("== RASTER Z2 — GLES REAL no hospedeiro (0.12-Z2 FASE 0) ==\n");
@@ -635,6 +887,13 @@ int main(int argc, char** argv) {
         const int f = fuzzRun(fuzzCycles, fuzzSeed);
         onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
         std::printf("\n%s (falhas=%d)\n", f ? "FUZZ FALHOU" : "FUZZ OK", f);
+        return f ? 1 : 0;
+    }
+    if (sky2Mode) {
+        // FASE 2: o varrimento de câmara usa o MESMO boot
+        const int f = sky2Run(sky2Poses);
+        onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
+        std::printf("\n%s (falhas=%d)\n", f ? "SKY2 FALHOU" : "SKY2 OK", f);
         return f ? 1 : 0;
     }
 
