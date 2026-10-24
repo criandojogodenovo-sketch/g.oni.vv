@@ -76,6 +76,15 @@ inline EGLContext eglCreateContext(EGLDisplay, EGLConfig, EGLContext, const EGLi
 inline int eglDestroyContext(EGLDisplay, EGLContext) { return 1; }
 inline int eglMakeCurrent(EGLDisplay, EGLSurface, EGLSurface, EGLContext) { return 1; }
 inline int eglSwapBuffers(EGLDisplay, EGLSurface) { return 1; }
+// 0.12-Z F3: as sondas do contexto (o hospedeiro responde "vivo" — o
+// shape é o mesmo do device; a perda SIMULADA usa o botão da F4)
+#define EGL_DRAW 0x3059
+inline EGLContext eglGetCurrentContext() {
+    return reinterpret_cast<EGLContext>(static_cast<intptr_t>(0x1));
+}
+inline EGLSurface eglGetCurrentSurface(EGLint) {
+    return reinterpret_cast<EGLSurface>(static_cast<intptr_t>(0x2));
+}
 inline int eglQuerySurface(EGLDisplay, EGLSurface, EGLint attr, EGLint* v) {
     // 0.8.12: o tamanho vem do eglstub (o harness do C33 virtual põe
     // 1536×720; o default mantém 1280×720 dos testes existentes)

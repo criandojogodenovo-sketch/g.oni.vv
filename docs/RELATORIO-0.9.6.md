@@ -866,3 +866,18 @@ dos passes aferrada (antes = depois; a sentinela vigia). pin
 env_sana_nan + R-067 regress_glctx_fase2 · test_core 0 falhas ·
 c33_virtual 1008/0 · gates VERDES · **versionCode 127** — o par
 declarado aqui e no build config.
+
+### §14-r — 0.12-Z F3 (a deteção e a recuperação do contexto) — versionCode 128
+
+**G8** (o par declarado no MESMO commit, a regra do §14): a FASE 3 da
+campanha (o RELATORIO-0.12-Z-GLCTX.md §F3): a sonda por frame no topo do
+frame() (2 chamadas EGL + glIsProgram/glIsTexture + o glGetError em série
+com limiar 30), a recuperação PELO GESTOR da F1 (o reset da interação → o
+detach → o releaseAll → o invalidateAll → o recreateAll → a câmara sã; a
+falha arma o cooldown), os resets no PAUSE/LOST_FOCUS (o ACTION_CANCEL já
+soltava — InputState.cpp:41 verificado), o chip «GL: OK/RECRIADO n» só no
+debug e o botão «Reiniciar renderer» nas Definições (o MESMO caminho do
+automático). O picking provado CPU puro (0 leituras GL no caminho do
+gizmo). pin context_recovery_ciclo + R-068 regress_glctx_fase3 ·
+test_core 0 falhas · gates VERDES · **versionCode 128** — o par
+declarado aqui e no build config.

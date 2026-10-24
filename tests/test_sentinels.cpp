@@ -9255,3 +9255,91 @@ TEST(regress_glctx_fase2) {
                    "func");
     }
 }
+
+// R-068 (0.12-Z F3) — A RECUPERAÇÃO AUTOMÁTICA NÃO MORRE —
+// regress_glctx_fase3: a SONDA por frame no topo do frame() (o contexto/
+// surface EGL + glIsProgram/glIsTexture + o glGetError em SÉRIE com o
+// limiar), a RECUPERAÇÃO pelo gestor da F1 (o detach → o release → o
+// invalidateAll → o recreateAll → a câmara sã → o reset da interação), o
+// INDICADOR DE SAÚDE «GL: RECRIADO n» (só no debug) e o BOTÃO do dono nas
+// Definições.
+TEST(regress_glctx_fase3) {
+    std::string src;
+    EXPECT(readFileText(
+        REPO_ROOT "/app/src/main/cpp/platform/main.cpp", src));
+    const std::string code = test::stripCppComments(src);
+    // (1) a sonda no TOPO do frame (o dono: «verificação por frame barata»)
+    EXPECT_MSG(code.find("contextEnsureAlive();") != std::string::npos,
+               "R-068: a sonda por frame saiu do frame()");
+    // (2) as sondas GL e o glGetError em SÉRIE (o limiar existe — um erro
+    //     isolado não é perda)
+    EXPECT_MSG(code.find("glIsProgram(g_renderer.uiProgram())") !=
+                       std::string::npos &&
+                   code.find("glIsTexture(g_renderer.whiteTexture())") !=
+                       std::string::npos,
+               "R-068: as sondas glIsProgram/glIsTexture sumiram");
+    EXPECT_MSG(code.find("kGlErrorStreakMax = 30") != std::string::npos,
+               "R-068: o limiar do glGetError em série sumiu");
+    // (3) a recuperação pelo GESTOR (a fonte única da F1 — nada de listas
+    //     à mão na recuperação)
+    EXPECT_MSG(code.find("contextRecover(const char* why)") !=
+                       std::string::npos &&
+                   code.find("detachRenderersFromGpu();") !=
+                       std::string::npos,
+               "R-068: a recuperação perdeu o ciclo (detach/gpu/gestor)");
+    {
+        const size_t rec = code.find("void contextRecover(const char* why)");
+        ASSERT(rec != std::string::npos);
+        const std::string body =
+            code.substr(rec, code.find("void contextEnsureAlive", rec) - rec);
+        EXPECT_MSG(body.find("g_glResources.invalidateAll();") !=
+                       std::string::npos &&
+                       body.find("g_glResources.recreateAll()") !=
+                           std::string::npos &&
+                       body.find("editorRecalcHitCaches();") !=
+                           std::string::npos &&
+                       body.find("cameraEnsureSane();") !=
+                           std::string::npos,
+                   "R-068: a recuperação não passa pelo gestor + o reset "
+                   "da interação + a câmara sã");
+    }
+    // (4) o reset da interação no PAUSE e no LOST_FOCUS
+    {
+        const size_t pause = code.find("case APP_CMD_PAUSE:");
+        ASSERT(pause != std::string::npos);
+        EXPECT_MSG(code.find("editorRecalcHitCaches();", pause) <
+                       code.find("case APP_CMD_RESUME:"),
+                   "R-068: o PAUSE deixou de resetar a interação");
+        const size_t lost = code.find("case APP_CMD_LOST_FOCUS:");
+        ASSERT(lost != std::string::npos);
+        EXPECT_MSG(code.find("editorRecalcHitCaches();", lost) <
+                       code.find("case APP_CMD_DESTROY:"),
+                   "R-068: o LOST_FOCUS deixou de resetar a interação");
+    }
+    // (5) o indicador de saúde (só no debug) e o botão do dono
+    EXPECT_MSG(code.find("g_contextRecreations == 0") !=
+                   std::string::npos,
+               "R-068: o indicador de saúde sumiu da statusLine");
+    {
+        std::string sp;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/ui/SettingsPage.cpp", sp));
+        EXPECT_MSG(test::stripCppComments(sp).find("kRestartRendererId") !=
+                       std::string::npos,
+                   "R-068: o botão Reiniciar renderer saiu das Definições");
+    }
+    // (6) o ACTION_CANCEL segue a soltar TODOS os ponteiros (o contrato do
+    //     dono — o reset da interação no sistema de input)
+    {
+        std::string is;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/platform/InputState.cpp", is));
+        const std::string isc = test::stripCppComments(is);
+        EXPECT_MSG(isc.find("case AMOTION_EVENT_ACTION_UP:") !=
+                       std::string::npos &&
+                   isc.find("case AMOTION_EVENT_ACTION_CANCEL:") !=
+                       std::string::npos &&
+                   isc.find("releaseAll();") != std::string::npos,
+                   "R-068: o ACTION_CANCEL deixou de soltar os ponteiros");
+    }
+}

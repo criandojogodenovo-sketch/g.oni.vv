@@ -549,3 +549,69 @@ TEST(env_sana_nan) {
     g.clampFields();
     EXPECT(nearEqF(g.timeOfDay, 12.0f, 1e-5f));
 }
+
+// ---------------------------------------------------------------------------
+// 8. A RECUPERAÇÃO DO CONTEXTO (0.12-Z F3): o contextRecover corre o ciclo
+// INTEIRO (o reset da interação → o detach dos renderers → o release da
+// GPU → o invalidateAll → o recreateAll) e o hospedeiro prova o que é
+// determinístico: o contador sobe, a interação zera, a GPU sai, a falha
+// da fonte (o host não tem /system/fonts) é REPORTADA com cooldown, e as
+// camadas GL recriam de seguida. A SONDA por frame é ESTÁVEL no host (o
+// stub responde vivo — a perda só se simula no device/botão da F4).
+// ---------------------------------------------------------------------------
+TEST(context_recovery_ciclo) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetCtxTest();
+    glstub::fb::enabled = true;
+    javaRegistersGranted();
+    bootEditor();
+    buildCubeScene();
+    const u32 ticsAntes = g_scene.count();
+    EXPECT(ticsAntes >= 1);
+
+    // a sonda estável no host (o stub responde vivo): frames não recuperam
+    const u32 rec0 = g_contextRecreations;
+    frame();
+    frame();
+    EXPECT_MSG(g_contextRecreations == rec0,
+               "0.12-Z F3: a sonda disparou no host SEM perda (%u → %u)",
+               rec0, g_contextRecreations);
+
+    // o CICLO de recuperação (o caminho real do device e do botão)
+    g_gizmo.active = gizmo::Axis::X;   // um gizmo «agarrado»
+    contextRecover("pin");
+    EXPECT_MSG(g_contextRecreations == rec0 + 1,
+               "0.12-Z F3: o contador não subiu (%u → %u)",
+               rec0, g_contextRecreations);
+    // o reset da interação (o dono: o gizmo agarrado, a hit-test cache)
+    EXPECT(g_gizmo.active == gizmo::Axis::None);
+    EXPECT(!g_gizmoBeforeValid);
+    // a GPU saiu (os assets órfãos recarregam da CPU sob demanda)
+    EXPECT_MSG(g_gpu.meshCount() == 0 && g_gpu.textureCount() == 0,
+               "0.12-Z F3: a GPU não foi libertada na recuperação "
+               "(mesh %u tex %u)",
+               (unsigned)g_gpu.meshCount(), (unsigned)g_gpu.textureCount());
+    // a falha da FONTE no host é HONESTA (o /system/fonts não existe) e
+    // arma o cooldown (não martelar)
+    EXPECT_MSG(std::strcmp(g_glResources.lastFailed(), "font") == 0,
+               "0.12-Z F3: o lastFailed é '%s' (esperado font no host)",
+               g_glResources.lastFailed());
+    EXPECT_MSG(g_recoveryCooldown == kRecoveryCooldownFrames,
+               "0.12-Z F3: o cooldown não armou (%u)",
+               g_recoveryCooldown);
+    // a CENA fica (o dono: «sem apagar a cena»)
+    EXPECT_MSG(g_scene.count() == ticsAntes,
+               "0.12-Z F3: a cena APAGOU na recuperação (%u → %u)",
+               ticsAntes, g_scene.count());
+
+    // as camadas GL recriam de seguida (o que o device faz sozinho — o
+    // host tem de à mão porque a fonte não existe)
+    EXPECT(g_glResources.recreateLayer("gpu-cube"));
+    EXPECT(g_glResources.recreateLayer("grid"));
+    EXPECT(g_glResources.recreateLayer("sky"));
+    EXPECT(g_glResources.recreateLayer("particles"));
+    EXPECT(g_glResources.recreateLayer("renderer"));
+    EXPECT(g_glResources.isValid("renderer"));
+    EXPECT(g_cubeMesh.ok());
+}

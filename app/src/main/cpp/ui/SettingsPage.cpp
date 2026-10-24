@@ -463,6 +463,13 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
             }
             y += settingsRowH();
         }
+        // 0.12-Z F3 — o BOTÃO DO DONO: a recriação TOTAL sem fechar o app
+        // (o mesmo caminho da recuperação automática da sonda por frame)
+        if (actionRow(ui, kRestartRendererId, ox, y, aw,
+                      "renderer (sem fechar o app)", "Reiniciar")) {
+            res = kRestartRenderer;
+        }
+        y += settingsRowH();
     }
 
     // ---- DOCS (0.9.0: a secção EXISTE sem a linha — entra na 0.9.2) ----------

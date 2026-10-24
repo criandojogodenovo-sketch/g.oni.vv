@@ -256,6 +256,11 @@ inline const GLubyte* glGetString(GLenum name) {
 }
 inline void glGetIntegerv(GLenum p, GLint* v) { if (v) *v = 0; }
 inline GLboolean glIsEnabled(GLenum) { return GL_FALSE; }   // 0.12-Z F0
+// 0.12-Z F3: as sondas do contexto (o device pergunta ao driver; o
+// hospedeiro responde "vivo" para qualquer nome != 0 — o shape é o mesmo)
+inline GLboolean glIsProgram(GLuint name) { return name != 0 ? 1 : 0; }
+inline GLboolean glIsTexture(GLuint name) { return name != 0 ? 1 : 0; }
+inline GLboolean glIsFramebuffer(GLuint name) { return name != 0 ? 1 : 0; }
 inline const GLubyte* glGetStringi(GLenum, GLuint index) {
     if (glstub::astcLdr && index == 0) {
         return reinterpret_cast<const GLubyte*>(

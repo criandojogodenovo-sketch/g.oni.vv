@@ -1,8 +1,7 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-24 · vc: 127 · Último commit: este (a 0.12-Z F2 —
-a ORIGEM DA SOMBRA: o WE sã + a névoa highp; o
-RELATORIO-0.12-Z-GLCTX.md §F2);
+Atualizado: 2026-10-24 · vc: 128 · Último commit: este (a 0.12-Z F3 —
+a deteção/recuperação do contexto; o RELATORIO-0.12-Z-GLCTX.md §F3);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -10,13 +9,21 @@ RELATORIO-0.12-Z-GLCTX.md §F2);
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-Z (ANTI-PERDA DE CONTEXTO OPENGL + A SOMBRA) — F0..F2
-  FECHADAS (vc 125..127)**. **F2 (vc 127)**: a CAUSA RAIZ da sombra (o
+- **Campanha 0.12-Z (ANTI-PERDA DE CONTEXTO OPENGL + A SOMBRA) — F0..F3
+  FECHADAS (vc 125..128)**. **F3 (vc 128)**: a sonda por frame no topo do
+  frame() (2 chamadas EGL + glIsProgram/glIsTexture + o glGetError em
+  série com limiar 30 — o erro isolado não é perda), a recuperação PELO
+  GESTOR da F1 (o reset da interação → o detach → o releaseAll → o
+  invalidateAll → o recreateAll → a câmara sã; a falha arma o cooldown de
+  30 frames — nunca martelar), os resets no PAUSE/LOST_FOCUS (o
+  ACTION_CANCEL já soltava — InputState.cpp:41), o chip «GL: OK/RECRIADO
+  n» só no debug e o botão «Reiniciar renderer» nas Definições (o MESMO
+  caminho do automático). O picking provado CPU puro (0 leituras GL). pin
+  context_recovery_ciclo + R-068 + M-Z6/M-Z7. **F2 (vc 127)** **F2 (vc 127)**: a CAUSA RAIZ da sombra (o
   fogDensity NaN PASSAVA pela clamp — comparações com NaN sempre falsas —
-  e envenenava a exp2 do lit FS: outColor NaN = o PRETO; §F2.1 do
-  relatório); a cura na FONTE (Environment::sane em TODOS os f32), a
-  névoa em highp + fogD·fogD (o pow em fp16 degenerava), a grelha com o
-  trio EXPLÍCITO (test ON, func LESS, write OFF), o depth func reposto à
+  e envenenava a exp2 do lit FS: outColor NaN = o PRETO; §F2.1); a cura
+  na FONTE (Environment::sane em TODOS os f32), a névoa em highp
+  + fogD·fogD, a grelha com o trio EXPLÍCITO, o depth func reposto à
   entrada do 3D. pin env_sana_nan + R-067 + M-Z5. **F1 (vc 126)**: render/GlResources.h
   NOVO — o GLResourceManager (a FONTE ÚNICA da recriação; o ACHADO: o
   g_particles.destroy() FALTAVA na lista manual do term da 0.6.7); as 8
@@ -27,30 +34,23 @@ RELATORIO-0.12-Z-GLCTX.md §F2);
   A fila UI→render: NÃO há corrida por construção. 0 FBOs. pins ×2 +
   R-066 + M-Z3/M-Z4.
   **F0 (vc 125)** (a cláusula calma: SÓ o ciclo de vida GL/render +
-  testes; UI visual, V.ONI, importadores, física e .gmesh INTACTOS; a
-  história no RELATORIO-0.12-Z-GLCTX.md). **F0 (vc 125) — o
-  DIAGNÓSTICO sem mudar comportamento**: render/GlDebug.h NOVO (os
+  testes; UI visual, V.ONI, importadores, física e .gmesh INTACTOS).
+  **O DIAGNÓSTICO**: render/GlDebug.h NOVO (os
   Masks com o mestre OFF = render normal byte a byte; os contadores
   onCreated/onDestroyed por kind; o PassState::capture/describe/
   differs; o passBoundary que loga SÓ a MUDANÇA; o checkErrors) · os
-  gates POR PASSE no frame real (env/sky/geometria no LOOP E NO
-  DIRETO/partículas/grelha/gizmos/UI com a toolbar SEMPRE viva; o
-  vidro no UiContext) · o inventário GL no fim do boot · os timestamps
-  de lifecycle no INIT/TERM/LOST_FOCUS/GAINED_FOCUS (os 2 últimos
-  NOVOS) · os 11 toggles nas Definições → Diagnóstico (ids
-  5840..5850, de sessão) · o §F0.3 do relatório fecha as 4 CANDIDATAS
+  gates POR PASSE no frame real (env/sky/geometria nos 2 caminhos/
+  partículas/grelha/gizmos/UI com a toolbar viva; o vidro) · o
+  inventário GL no boot · os timestamps no INIT/TERM/LOST_FOCUS/
+  GAINED_FOCUS (os 2 últimos NOVOS) · os 11 toggles nas Definições ·
+  o §F0.3 fecha as 4 CANDIDATAS
   da sombra com ficheiro:linha (H1 o scrim/sheet preso que come os
   toques — EditorUi.cpp:3947/4086/4258, main.cpp:7424; H2 a textura
   GPU morta fora do boot; H3 o céu/WE com estado vencido; H4 o vidro
   dormente) e o §F0.4 ANALISA O CLIMA «não funciona» (a causa mais
   provável: presets sub-pixel — 0.015 m ≈ 1.3 px a 720p/7u; + o
   contexto perdido + o g_fxTime congelado + a origem no 0,0,0 + o NONE
-  que silencia) — A DECISÃO DOS NOVOS TAMANHOS É DO DONO (tweak de
-  spec, fora da cláusula). 0 FBOs no motor. pins ×4 (test_012z_ctx.cpp NOVO) + R-065
-  regress_glctx_fase0 + M-Z1/M-Z2 VERMELHAS AO VIVO. **SEGUEM**: F1 o
-  GLResourceManager · F2 a origem da sombra + a ordem dos passes · F3
-  as sondas por frame + o reset da interação · F4 os testes 20/20 —
-  UMA FASE POR COMMIT, CI VERDE ANTES DE AVANÇAR.
+  que silencia) — a decisão é do dono). 0 FBOs. pins ×4 + R-065 + M-Z1/M-Z2.
 
 - **Campanha 0.12-Y-F2 (O CLIMA E O VENTO) — FECHADA no código
   (vc 124; a história no RELATORIO-0.12-Y-F2-WEATHER.md)** (a cláusula

@@ -82,8 +82,8 @@ Atualizado: 2026-10-24 · vc: 124
   ParticleShader.h (**0.12-Y-F1**: as partículas GPU; **0.12-Y-F2**: o
   uWind — o vento GLOBAL do 1.º WindTIC ATIVO, a sobrecarga pura
   particlePos com vento), GlDebug.h (**0.12-Z F0**: toggles POR PASSE,
-  contadores GL, estado por passe), GlResources.h (**0.12-Z F1**: o
-  GLResourceManager — a recriação do contexto com DONO; 8 camadas),
+  contadores GL, estado por passe), GlResources.h (**0.12-Z F1**) e a
+  sonda/recuperação contextEnsureAlive/contextRecover no main (**F3**),
   **0.12-D (DORMENTE desde a 0.12-E)**: o SdfBatch.h + o 3.º PROGRAMA
   progSdf_ (o FS replica o app/src/main/cpp/ui/Sdf.h; runs pelo flag
   `sdf`) + o ramo FOGO-ONLY + o Glass.h (o KAWASE dual) + o captureGlass

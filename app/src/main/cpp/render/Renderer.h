@@ -100,6 +100,8 @@ public:
     }
 
     u32 whiteTexture() const { return whiteTex_; }
+    // 0.12-Z F3: o PROGRAMA da UI (a sonda do contexto — glIsProgram)
+    u32 uiProgram() const { return prog_; }
     // 0.12-E (E-3 · FASE 3.4): a TEXTURA DE RUÍDO 2D das bordas ativas
     // (64×64, tileável, GL_REPEAT — o upload no init come o ui/Noise2D.h,
     // a FONTE ÚNICA da matemática; o emissor é o UiContext::fireBorder2D)

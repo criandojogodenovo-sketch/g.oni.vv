@@ -87,6 +87,7 @@ constexpr u64 kDbgUiId      = 5847;
 constexpr u64 kDbgGlassId   = 5848;
 constexpr u64 kDbgStateLogId= 5849;
 constexpr u64 kDbgErrLogId  = 5850;
+constexpr u64 kRestartRendererId = 5851;   // 0.12-Z F3: o botão do dono
 constexpr u64 kScrollId     = 49;    // região de scroll da página
 
 // ---- bits das secções (colapsáveis — PERSISTE via layout.json) --------------
@@ -145,6 +146,7 @@ enum Result {
     kDbgGlass,
     kDbgStateLog,
     kDbgErrLog,
+    kRestartRenderer,  // 0.12-Z F3: a recriação total SEM fechar o app
 };
 
 // desenha a PÁGINA inteira (full-screen na banda do viewport) e processa os

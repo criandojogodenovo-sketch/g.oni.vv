@@ -276,6 +276,61 @@ mundo.** As fronteiras do F0 logam a ordem real no engine.log.
     o reset do estado de interação.
 
 
-## §F3 — A DETEÇÃO E A RECUPERAÇÃO (a preencher)
+## §F3 — A DETEÇÃO E A RECUPERAÇÃO (FASE 3)
+
+### F3.1 — O QUE ENTROU
+
+| Peça | Onde | O que faz |
+|---|---|---|
+| A SONDA por frame | main.cpp `contextEnsureAlive()` no TOPO do frame() | 2 chamadas EGL (contexto/surface nulos = perdido) + `glIsProgram(uiProgram)` + `glIsTexture(whiteTexture)`; o `glGetError` em SÉRIE com limiar 30 (~0.5 s a 60 fps — um erro isolado NÃO é perda); cooldown de 30 frames entre tentativas (nunca martelar) |
+| A RECUPERAÇÃO | main.cpp `contextRecover(why)` | o ciclo do dono: reset da interação (`editorRecalcHitCaches` + `g_input.resetAll`) → `detachRenderersFromGpu` → `g_gpu.releaseAll` (os assets recarregam LAZY da CPU) → `invalidateAll` → `recreateAll` (o gestor da F1 — UMA fonte) → `cameraEnsureSane` → o log «recuperação #n COMPLETA» |
+| O reset da interação | APP_CMD_PAUSE + APP_CMD_LOST_FOCUS | o gesto atual, os ponteiros ativos, o gizmo agarrado, o eixo, o drag, a hit-test cache (o F1 já cobria INIT/RESIZED/RESUME; a F3 completa o dono) — o ACTION_CANCEL/pointer-up JÁ soltavam tudo (InputState.cpp:41..43, verificado) |
+| O indicador de saúde | statusLine (só com o mestre do debug ON) | «GL: OK» / «GL: RECRIADO n» + o log na Consola a cada recuperação |
+| O botão do dono | Definições → Diagnóstico → «Reiniciar renderer» | a recriação TOTAL sem fechar o app — o MESMO caminho do contextRecover (zero atalhos) |
+
+### F3.2 — O PICKING (o item 4 do dono — verificado, nada a mudar)
+
+O picking e o gizmo são **CPU puro**: `gizmo::projectPoint` (a matemática
+da vp) + a hit-test dos rects — **0 leituras GL** (o único glReadPixels do
+produto é o export de layout — main.cpp:1128). NÃO há FBO/textura de
+picking → nada para recriar; os únicos handles que os pins usam são os
+probes da própria sonda.
+
+### F3.3 — O RELATÓRIO DE 16 ITENS (FASE 3)
+
+1. **Objetivo**: detetar a perda por frame (barata), recuperar sozinho
+   (<1 s), avisar, e dar o botão manual.
+2. **Causa raiz da campanha**: sem sondas, o app desenhava contra
+   contexto morto SEM saber (o §F0.2 mapeou o ciclo; a F1 deu o dono da
+   recriação; a F3 fecha o circuito).
+3. **Sintomas cobertos**: «o utilizador só percebe depois» — agora a
+   deteção é por frame, o log avisa, o indicador mostra.
+4. **O que mudou**: main.cpp (a sonda+recuperação+resets+chip+botão),
+   Renderer.h (o accessor uiProgram), SettingsPage.{h,cpp} (a linha),
+   stubs (as sondas glIs*/EGL do hospedeiro).
+5. **O que NÃO foi tocado**: o render de cada passe, o picking (CPU puro),
+   V.ONI, importadores, física, .gmesh, o tema, o layout visual.
+6. **Ordem dos passes**: intocada (a da F2).
+7. **Estado GL**: a recuperação repõe TUDO pelo gestor (as 8 camadas) +
+   os uniforms de cada camada renascem nos seus init (a F1).
+8. **Logs novos**: «CONTEXTO PERDIDO (…) — a recuperação #n começa» /
+   «recuperação #n COMPLETA» / «a recuperação #n FALHOU (…) — nova
+   tentativa em 30 frames».
+9. **Interruptores novos**: nenhum (o botão usa a secção existente).
+10. **Testes novos**: `context_recovery_ciclo` (o ciclo completo no host —
+    determinístico: a fonte falha no host e é REPORTADA com cooldown; a
+    cena fica; a interação zera; a sonda é ESTÁVEL sem perda).
+11. **Sentinela**: **R-068** `regress_glctx_fase3` (a sonda no frame; os
+    glIs*; o limiar 30; a recuperação pelo gestor; os resets no
+    PAUSE/LOST_FOCUS; o chip; o botão; o ACTION_CANCEL).
+12. **Verificação local**: test_core 0 falhas; gates verdes.
+13. **CI**: o run do commit desta fase.
+14. **Capturas**: as do dono — o chip «GL: RECRIADO n» na status bar
+    (debug ON) + o engine.log antes/depois do botão.
+15. **Riscos**: a sonda EGL por frame custa ~µs (2 chamadas); o limiar do
+    glGetError evita o loop de recuperação por erro benigno.
+16. **Próximo passo**: FASE 4 — o botão «Simular perda de contexto» + os
+    testes 20/20.
+
 
 ## §F4 — A PREVENÇÃO E OS TESTES 20/20 (a preencher)

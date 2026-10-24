@@ -65,6 +65,7 @@
 #include "platform/BuildInfo.h"   // 0.8.10: identidade (banner/dumps)
 #include "platform/CrashHandler.h"
 #include "platform/EglContext.h"
+#include <EGL/egl.h>   // 0.12-Z F3: as sondas (eglGetCurrentContext/surface)
 #include "render/GlDebug.h"   // 0.12-Z F0: o diagnóstico do contexto GL
 #include "render/GlResources.h"  // 0.12-Z F1: o GLResourceManager
 #include "platform/FileApi.h"
@@ -5484,6 +5485,85 @@ void editorRecalcHitCaches() {
     }
 }
 
+// 0.12-Z F3 — A DETEÇÃO E A RECUPERAÇÃO DO CONTEXTO PERDIDO (o dono):
+// sondas BARATAS por frame (o contexto/surface EGL vivos + glIsProgram do
+// shader principal + glIsTexture de uma textura-chave) e o glGetError em
+// SÉRIE (um erro isolado NÃO é perda — o GLES tem erros benignos nas
+// bordas; 30 seguidos sim). A recuperação reusa o gestor da F1: invalida
+// TUDO, recria a partir de CPU/ficheiros, repõe a câmara e o estado de
+// interação. O indicador de saúde mostra «GL: RECRIADO n» (o dono vê).
+u32 g_contextRecreations = 0;   // o contador do indicador de saúde
+u32 g_glErrorStreak = 0;        // os glGetError seguidos (o limiar 30)
+u32 g_recoveryCooldown = 0;     // os frames de espera entre tentativas
+
+static constexpr u32 kGlErrorStreakMax = 30;   // ~0.5 s a 60 fps
+static constexpr u32 kRecoveryCooldownFrames = 30;
+
+bool contextLostNow() {
+    // (1) o EGL: contexto/surface nulos = perdido (a sonda mais barata)
+    if (eglGetCurrentContext() == EGL_NO_CONTEXT ||
+        eglGetCurrentSurface(EGL_DRAW) == EGL_NO_SURFACE) {
+        return true;
+    }
+    // (2) as sondas GL: o programa da UI e a textura branca (o handle 0
+    //     depois do boot é perdido por definição)
+    if (glIsProgram(g_renderer.uiProgram()) != GL_TRUE ||
+        glIsTexture(g_renderer.whiteTexture()) != GL_TRUE) {
+        return true;
+    }
+    return false;
+}
+
+void contextRecover(const char* why) {
+    ++g_contextRecreations;
+    elog::warn("gldebug: CONTEXTO PERDIDO (%s) — a recuperação #%u começa",
+               why, g_contextRecreations);
+    // o reset do ESTADO DE INTERAÇÃO na perda (o dono: o gesto atual, os
+    // ponteiros, o gizmo agarrado, o eixo, o drag, a hit-test cache)
+    editorRecalcHitCaches();
+    g_input.resetAll();
+    // os assets da GPU ficam órfãos — os MeshRenderers desligam e o
+    // GpuAssets liberta (o recarregamento é LAZY pela CPU, como no term)
+    detachRenderersFromGpu();
+    g_gpu.releaseAll();
+    // as camadas (fontes/quad/grid/sky/partículas/renderer) pela FONTE
+    // ÚNICA da F1
+    g_glResources.invalidateAll();
+    if (!g_glResources.recreateAll()) {
+        elog::error("gldebug: a recuperação #%u FALHOU (%s) — nova "
+                    "tentativa em %u frames",
+                    g_contextRecreations, g_glResources.lastFailed(),
+                    kRecoveryCooldownFrames);
+        g_recoveryCooldown = kRecoveryCooldownFrames;
+        return;
+    }
+    cameraEnsureSane();
+    elog::warn("gldebug: recuperação #%u COMPLETA (as sondas voltaram)",
+               g_contextRecreations);
+}
+
+// a sonda por frame (o TOPO do frame() — barata: 2 chamadas EGL + 2 glIs*)
+void contextEnsureAlive() {
+    if (g_recoveryCooldown > 0) {
+        --g_recoveryCooldown;
+        return;
+    }
+    if (contextLostNow()) {
+        contextRecover("sonda (contexto/programa/textura mortos)");
+        return;
+    }
+    // o glGetError em série (o dono pede-o por frame; o limiar é a cura
+    // do falso positivo dos erros benignos)
+    if (glGetError() != GL_NO_ERROR) {
+        if (++g_glErrorStreak >= kGlErrorStreakMax) {
+            g_glErrorStreak = 0;
+            contextRecover("glGetError em série");
+        }
+    } else {
+        g_glErrorStreak = 0;
+    }
+}
+
 u32 feedTouchControls(f32 w, f32 h, bool& outDrawn, TouchControls** outTc) {
     u32 claimed = 0;
     outDrawn = false;
@@ -5769,6 +5849,11 @@ void onAppCmd(android_app* app, i32 cmd) {
             applyContentRect(app);
             break;
         case APP_CMD_PAUSE:
+            // 0.12-Z F3: o reset do ESTADO DE INTERAÇÃO (o dono: «gesto
+            // atual, ponteiros ativos, gizmo agarrado, eixo ativo, drag em
+            // curso, seleção temporária e hit-test em cache»)
+            editorRecalcHitCaches();
+            g_input.resetAll();
             // FASE 9 (G1-5): flush do debounce ao sair para segundo plano
             // (o write pendente NÃO se perde)
             if (g_layoutSaveTimer > 0.0f) {
@@ -5887,6 +5972,8 @@ void onAppCmd(android_app* app, i32 cmd) {
         case APP_CMD_LOST_FOCUS:   // 0.12-Z F0: o log que não existia
             elog::info("lifecycle: LOST_FOCUS (+%.2fs desde o boot)",
                        nowSeconds() - g_bootTime);
+            editorRecalcHitCaches();   // 0.12-Z F3: o gesto não sobrevive
+            g_input.resetAll();
             break;
         case APP_CMD_GAINED_FOCUS:
             elog::info("lifecycle: GAINED_FOCUS (+%.2fs desde o boot)",
@@ -6609,7 +6696,7 @@ void drawToast() {
 // blocos em cena o campo não aparece — a linha de sempre fica intacta).
 void statusLine(const DrawStats& st3d, const DrawStats& stGrid) {
     const DrawStats total = st3d + stGrid + g_lastUiStats;
-    char status[160];
+    char status[192];
     if (g_blockFrame.any) {
         std::snprintf(status, sizeof(status),
                       "fps %d  tics %u  verts %u  dc %u  bl %u/%u  am %u at %u"
@@ -6630,6 +6717,22 @@ void statusLine(const DrawStats& st3d, const DrawStats& stGrid) {
                       shortTexFormat(g_hwCompressor.lastFormat()),
                       g_texCache ? g_texCache->hits() : 0u,
                       g_texCache ? g_texCache->misses() : 0u);
+    }
+    // 0.12-Z F3 — O INDICADOR DE SAÚDE DO RENDERER (SÓ no debug — o mestre
+    // ON): «GL: OK» ou «GL: RECRIADO n» — o dono vê o ciclo de vida sem
+    // abrir o log
+    if (gldbg::g_masks.master) {
+        const size_t len = std::strlen(status);
+        std::snprintf(status + len, sizeof(status) - len, "  GL: %s",
+                      g_contextRecreations == 0
+                          ? "OK"
+                          : ([&] {
+                                static char buf[32];
+                                std::snprintf(buf, sizeof(buf),
+                                              "RECRIADO %u",
+                                              g_contextRecreations);
+                                return buf;
+                            })());
     }
     // 0.11-T (FASE 3.5a): o chip do SKINNED CULL — «skinned: culled %u/%u»
     // (os skinados que o frame NÃO desenhou por estarem fora do frustum,
@@ -6880,6 +6983,11 @@ static void layoutDumpIfPending(f32 w, f32 h) {
 }
 
 void frame() {
+    // 0.12-Z F3: A SONDA DO CONTEXTO (o dono: «verificação por frame
+    // barata») — se o contexto morreu, a recuperação corre AQUI e o frame
+    // segue com o contexto novo (o dono: «detetar, recuperar sozinho e
+    // avisar» — o log + o indicador de saúde)
+    contextEnsureAlive();
     const f32 w = static_cast<f32>(g_egl.width());
     const f32 h = static_cast<f32>(g_egl.height());
     g_layoutFrameAudited = false;   // GRUPO B: só o auditBegin deste frame acende
@@ -8048,6 +8156,22 @@ void frame() {
                 elog::info("gldebug: log de erros=%s", gldbg::g_errorLog
                                                            ? "on" : "off");
                 break;
+            case editor::settings::kRestartRenderer: {
+                // 0.12-Z F3 — O BOTÃO DO DONO: a recriação TOTAL sem
+                // fechar o app (o MESMO caminho da recuperação automática
+                // da sonda por frame — UMA fonte, zero atalhos)
+                contextRecover("botão Reiniciar renderer");
+                if (g_glResources.lastFailed()[0] == '\0') {
+                    char msg[64];
+                    std::snprintf(msg, sizeof(msg),
+                                  "renderer recriado (#%u)",
+                                  g_contextRecreations);
+                    showToast(msg);
+                } else {
+                    showToast("recuperação falhou — ver o engine.log");
+                }
+                break;
+            }
             case editor::settings::kOpenTextWindow: {
                 // 0.9.1 — o Settings fecha e a janela de texto fica COMO
                 // modal único (sem duplo-dispatch do mesmo toque nos dois
