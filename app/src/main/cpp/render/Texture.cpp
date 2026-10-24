@@ -5,6 +5,7 @@
 // PRONTA da CPU (TextureCompressor) e sobe UM glCompressedTexImage2D por
 // nível — a GPU nunca descomprime, a memória de vídeo é a do blob.
 #include "render/Texture.h"
+#include "render/GlDebug.h"   // 0.12-Z F0: contadores GL
 #include "assets/TextureCompressor.h"
 #include "platform/Log.h"
 #include <cstring>
@@ -61,6 +62,8 @@ Texture::~Texture() {
 }
 
 bool Texture::createFromRGBA(const u8* rgba, u32 w, u32 h) {
+    // 0.12-Z F0: a contagem vive NO UMBRAL (createFromCompressed) — este
+    // entry só empacota e delega
     CompressedImage img;
     img.format = CompressedFormat::RGBA8;
     img.width = w;
@@ -76,6 +79,7 @@ bool Texture::createFromRGBA(const u8* rgba, u32 w, u32 h) {
 }
 
 bool Texture::createFromCompressed(const CompressedImage& img) {
+    gldbg::onCreated(gldbg::Kind::Texture, 1);   // 0.12-Z F0
     destroy();
     if (!img.ok()) {
         LOGE("Texture: imagem inválida (%ux%u)", img.width, img.height);
@@ -135,6 +139,7 @@ bool Texture::createFromCompressed(const CompressedImage& img) {
 }
 
 void Texture::destroy() {
+    gldbg::onDestroyed(gldbg::Kind::Texture, tex_ ? 1 : 0);   // 0.12-Z F0
     if (tex_) {
         glDeleteTextures(1, &tex_);
         tex_ = 0;

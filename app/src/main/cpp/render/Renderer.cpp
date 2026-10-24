@@ -6,6 +6,7 @@
 #include "ui/Theme.h"   // 0.9.6.9: o clear lê o token bg (o vidro expõe o fundo)
 #include "ui/Sdf.h"     // 0.12-D (D-1): os parâmetros do nível (o toggle)
 #include <GLES3/gl3.h>
+#include "render/GlDebug.h"   // 0.12-Z F0: os contadores de recursos GL
 #include <vector>
 
 namespace vv {
@@ -380,6 +381,14 @@ bool Renderer::init() {
         return false;
     }
 
+    // 0.12-Z F0: o INVENTÁRIO deste init (prog=ui+sdf; o lit conta-se na
+    // camada dele — Material.cpp) — o resumo do boot/term vê nascer/morrer
+    gldbg::onCreated(gldbg::Kind::Program, 2);
+    gldbg::onCreated(gldbg::Kind::Vao, 2);
+    gldbg::onCreated(gldbg::Kind::Buffer, 2);
+    gldbg::onCreated(gldbg::Kind::Texture, 2);
+    gldbg::checkUniformLoc(locProj_, "uProj", "UI");
+    gldbg::checkUniformLoc(locTex_, "uTex", "UI");
     LOGI("Renderer: pipeline 3D (Mesh/LitMaterial) + batch de quads UI + "
          "pass SDF de widget prontos");
     return true;
@@ -709,6 +718,22 @@ DrawStats Renderer::endFrame() {
 }
 
 void Renderer::shutdown() {
+    // 0.12-Z F0: o inventário da MORTE (só o que está vivo é contado)
+    u32 dProg = 0, dVao = 0, dBuf = 0, dTex = 0;
+    if (progSdf_)  ++dProg;
+    if (prog_)     ++dProg;
+    if (vaoSdf_)   ++dVao;
+    if (vao_)      ++dVao;
+    if (vboSdf_)   ++dBuf;
+    if (vbo_)      ++dBuf;
+    if (whiteTex_) ++dTex;
+    if (noiseTex_) ++dTex;
+    if (glassTex_) ++dTex;
+    // (o lit conta-se na camada dele — Material.cpp destroy)
+    gldbg::onDestroyed(gldbg::Kind::Program, dProg);
+    gldbg::onDestroyed(gldbg::Kind::Vao, dVao);
+    gldbg::onDestroyed(gldbg::Kind::Buffer, dBuf);
+    gldbg::onDestroyed(gldbg::Kind::Texture, dTex);
     lit_.destroy();
     if (glassTex_) { glDeleteTextures(1, &glassTex_); glassTex_ = 0; }
     if (vboSdf_)   { glDeleteBuffers(1, &vboSdf_); vboSdf_ = 0; }

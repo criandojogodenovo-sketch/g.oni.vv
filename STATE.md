@@ -1,14 +1,41 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-24 · vc: 124 · Último commit: este (a 0.12-Y-F2 —
-o CLIMA E O VENTO: AmbientEnvironment + WindTIC; o
-RELATORIO-0.12-Y-F2-WEATHER.md);
+Atualizado: 2026-10-24 · vc: 125 · Último commit: este (a 0.12-Z F0 —
+o DIAGNÓSTICO do contexto GL; o RELATORIO-0.12-Z-GLCTX.md §F0);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
 > Atualiza-se no MESMO commit que fecha a sub-fase (regra §6 abaixo).
 
 ## §1 Onde estamos
+
+- **Campanha 0.12-Z (ANTI-PERDA DE CONTEXTO OPENGL + A SOMBRA) — F0
+  FECHADA (vc 125)** (a cláusula calma: SÓ o ciclo de vida GL/render +
+  testes; UI visual, V.ONI, importadores, física e .gmesh INTACTOS; a
+  história no RELATORIO-0.12-Z-GLCTX.md). **F0 (vc 125) — o
+  DIAGNÓSTICO sem mudar comportamento**: render/GlDebug.h NOVO (os
+  Masks com o mestre OFF = render normal byte a byte; os contadores
+  onCreated/onDestroyed por kind; o PassState::capture/describe/
+  differs; o passBoundary que loga SÓ a MUDANÇA; o checkErrors) · os
+  gates POR PASSE no frame real (env/sky/geometria no LOOP E NO
+  DIRETO/partículas/grelha/gizmos/UI com a toolbar SEMPRE viva; o
+  vidro no UiContext) · o inventário GL no fim do boot · os timestamps
+  de lifecycle no INIT/TERM/LOST_FOCUS/GAINED_FOCUS (os 2 últimos
+  NOVOS) · os 11 toggles nas Definições → Diagnóstico (ids
+  5840..5850, de sessão) · o §F0.3 do relatório fecha as 4 CANDIDATAS
+  da sombra com ficheiro:linha (H1 o scrim/sheet preso que come os
+  toques — EditorUi.cpp:3947/4086/4258, main.cpp:7424; H2 a textura
+  GPU morta fora do boot; H3 o céu/WE com estado vencido; H4 o vidro
+  dormente) e o §F0.4 ANALISA O CLIMA «não funciona» (a causa mais
+  provável: presets sub-pixel — 0.015 m ≈ 1.3 px a 720p/7u; + o
+  contexto perdido + o g_fxTime congelado + a origem no 0,0,0 + o NONE
+  que silencia) — A DECISÃO DOS NOVOS TAMANHOS É DO DONO (tweak de
+  spec, fora da cláusula). 0 FBOs no motor (o toggle "pós" é no-op
+  documentado). pins ×4 (test_012z_ctx.cpp NOVO) + R-065
+  regress_glctx_fase0 + M-Z1/M-Z2 VERMELHAS AO VIVO. **SEGUEM**: F1 o
+  GLResourceManager · F2 a origem da sombra + a ordem dos passes · F3
+  as sondas por frame + o reset da interação · F4 os testes 20/20 —
+  UMA FASE POR COMMIT, CI VERDE ANTES DE AVANÇAR.
 
 - **Campanha 0.12-Y-F2 (O CLIMA E O VENTO) — FECHADA no código
   (vc 124; a história no RELATORIO-0.12-Y-F2-WEATHER.md)** (a cláusula
@@ -47,59 +74,18 @@ RELATORIO-0.12-Y-F2-WEATHER.md);
   sondas de píxel) + R-063 + M-V1/V2/V3 VERMELHAS AO VIVO.
 
 - **Campanha FASE UI (O REDESIGN VISUAL) — A..J FECHADAS (vc 111..120,
-  o CI VERDE em cada parte; um commit por parte; a história e os
-  não-feitos no RELATORIO-FASE-UI.md)**: A o FICHEIRO ÚNICO DE TOKENS
-  (a paleta exata do dono) · B a BARRA 40DP (o achado do CI: a sonda
-  35.2 + o build_c33.py) · C a HIERARQUIA 40DP · D o VIEWPORT (a
-  coluna das 4 ferramentas) · E o INSPECTOR (o cabeçalho do TIC) · F a
-  BARRA FINA + o painel encaixado (as 4 TABS, o estado em mono) · G as
-  FOLHAS CONTIDAS (o teto 85%) · H o EDITOR DE CÓDIGO (o MONO do 2.º
-  atlas; as causas no §11 do relatório) · I as ABAS ÁUDIO E UI (o
-  orçamento vertical) · J a TELA DE PROJETOS (o ícone da engine + o
-  Importar secundário). Pins ×10 + M-UIa..j.
-
+  o CI VERDE em cada parte; um commit por parte; A HISTÓRIA no
+  RELATORIO-FASE-UI.md — A os tokens · B a barra 40 · C a hierarquia ·
+  D o viewport · E o inspector · F a barra fina · G as folhas · H o
+  editor de código · I as abas Áudio/UI · J a tela de projetos).
 - **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — A..E, o C-FIX, a F1
   e a F2 fechadas (vc 106..124)** (a cláusula calma: SÓ o prompt; a
-  V.ONI intocada; a história nos RELATORIO-0.12-Y-*.md).
-  **F1 (vc 122)**: o TIC PARTICLEEMITTER (no
-  RELATORIO-0.12-Y-F1-PARTICLES.md) — VERTEX SHADER ANIMATION (GLES 3.0,
-  ZERO compute): o CPU gera UMA VEZ o VBO de seeds (teto 2000; o slider
-  só muda o count) e o VS faz a balística com o tempo local
-  mod(uTime+seed·100, life); UM glDrawArraysInstanced por emissor; o FS
-  lê a textura OU o disco procedural + o fade out; o preset (o 9.º do
-  "+"); o Inspector com a secção; o .goni transporta; a PAUSA congela o
-  g_fxTime; pins ×3 + R-062 + M-Yf1/M-Yf2 AO VIVO (a M-Yf2 apanhou um
-  pin AMBÍGUO — apertado, a lição M-UIj).
-  **E (vc 121)**: o CICLO DIA/NOITE (no RELATORIO-0.12-Y-E-SKY.md) — a
-  grade dos 4 estados NO CPU 1×/frame (o FS consome os uniforms JÁ
-  graduados; ESTRELAS num branch uniforme); o sol roda pelo relógio e a
-  DIRECTIONAL sincroniza; cloudHeight escala o plano; autoCycle (anel
-  24h); Inspector +4; .goni: tod/cycSpd/cycOn/cloudH; pins ×4 +
-  R-061(5) + M-Ye1/M-Ye2 AO VIVO.
-  **D (vc 110)**: o CÉU PROCEDURAL (no RELATORIO-0.12-Y-SKY.md) — o
-  shader do céu (render/SkyRenderer.{h,cpp} NOVOS: o quad fullscreen +
-  o gradiente + o sol + as nuvens FBM 2D com hash inteiro e O TEMPO no
-  UV; a base da câmara extraída da vista), o Environment ganha
-  skyType/cores/sol/nuvens/vento, o .goni transporta, o Inspector com o
-  dropdown + os 5 campos SÓ no procedural (o main desenha o quad ANTES
-  dos modelos com skyType==1 e o g_skyTime avança 1×/frame); pins ×2 +
-  R-061 + M-Yd1/2 (o achado: o falso verde POR COMENTÁRIO nasceu o
-  test::stripCppComments).
-  **C-FIX (vc 109)**: o TESTE DO DONO (Inspector do WorldEnvironment
-  VAZIO + modelo BRANCO) — a secção Environment NO Inspector (céu hex ·
-  hdri pelo NAVEGADOR · ambiente · névoa · névoa hex, tudo no .goni), o
-  albedo = uBaseColorTex (unit 0), o thumb do baseColor; pins ×2.
-  **C (vc 108)**: o PIPELINE PBR — os 5 slots na PASTA DO MODELO
-  assets/<stem>/textures/ (dedup FNV-1a), o BIND AUTO, o lit PBR-LITE
-  pela FONTE ÚNICA render/Pbr.h (normal por derivadas, rough/metal,
-  névoa exp2 0=MORTA, uAmbientScale), o TIC WorldEnvironment NOVO (o
-  7.º preset); pins ×4 + R-060 + M-Yc1/2.
-  **B (vc 107)**: o ÍCONE IA — a FONTE com o prompt EXATO do dono, a
-  extração por TEXTURA high-pass, o tile a 65% da ZONA SEGURA, os 15
-  PNGs + o fundo #0A0A0C; icon_ia_mipmaps + M-Yb1.
-  **A (vc 106)**: o PAN da câmara — a 6.ª FERRAMENTA no rail, o
-  Camera::pan pela FONTE ÚNICA pura, o modo Pan (1 dedo SEM orbitar) e
-  o pan de 2 DEDOS LIVRE (o pinch intacto); pins ×5 + R-059 + M-Ya1/2.
+  V.ONI intocada; A HISTÓRIA COMPLETA nos RELATORIO-0.12-Y-*.md — A o
+  PAN (vc 106) · B o ÍCONE IA (107) · C o PBR + WorldEnvironment
+  (108) · C-FIX o Inspector do WE (109) · D o CÉU PROCEDURAL (110) ·
+  E o DIA/NOITE (121) · F1 o PARTICLEEMITTER (122) · F2 o CLIMA E O
+  VENTO (124) — cada uma com os pins, a sentinela e as mutações ao
+  vivo no seu relatório).
 - **Campanha 0.12-QoL (UI POLISH + NAVEGADOR + AUTO-SAVE) — FECHADA
   (A..D, vc 102–105)** (no RELATORIO-0.12-QoL.md; pins ×13 + R-056/057/058).
 - **Campanha 0.12-X (CÂMARA DE TERCEIRA PESSOA) — FECHADA (3.9x, vc

@@ -9037,3 +9037,82 @@ TEST(regress_weather) {
                    "R-064: o clima/vento não volta do .goni");
     }
 }
+
+// R-065 (0.12-Z F0) — O DIAGNÓSTICO GL NÃO MORRE — regress_glctx_fase0:
+// (1) os INTERRUPTORES POR PASSE existem e o mestre nasce OFF (o render
+//     normal byte a byte — o custo de estar desligado é UM bool);
+// (2) o ISOLAMENTO vive no frame REAL: a grelha com gate, a geometria com
+//     gate no LOOP e no caminho DIRETO, a UI com escape (toolbar fica);
+// (3) os CONTADORES de recursos GL alimentam o resumo do boot/term;
+// (4) as FRONTEIRAS de passe com estado GL (o vazamento é logado).
+TEST(regress_glctx_fase0) {
+    // (1)+(4) o módulo existe com o contrato inteiro
+    {
+        std::string src;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/render/GlDebug.h", src));
+        const std::string code = test::stripCppComments(src);
+        EXPECT_MSG(code.find("bool master   = false;") != std::string::npos,
+                   "R-065: o mestre do debug não nasce OFF");
+        EXPECT_MSG(code.find("struct PassState") != std::string::npos &&
+                       code.find("inline PassState capture()") !=
+                           std::string::npos &&
+                       code.find("inline void passBoundary(") !=
+                           std::string::npos,
+                   "R-065: o snapshot de estado por passe sumiu");
+        EXPECT_MSG(code.find("inline void summaryLine(") !=
+                       std::string::npos,
+                   "R-065: o resumo de contadores sumiu");
+    }
+    // (2) os gates no frame REAL (o fonte SEM comentários — M-Yd1)
+    {
+        std::string src;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/platform/main.cpp", src));
+        const std::string code = test::stripCppComments(src);
+        EXPECT_MSG(code.find("gldbg::g_masks.master") != std::string::npos,
+                   "R-065: o main deixou de consumir o mestre");
+        EXPECT_MSG(code.find(
+                       "showGrid ? g_grid.draw(vp, camEye, camFocus)") !=
+                       std::string::npos,
+                   "R-065: a GRELHA perdeu o gate (o «só a grelha» morre)");
+        EXPECT_MSG(
+            code.find("showGeom && i < mrs.size()") != std::string::npos &&
+                code.find("if (showGeom) {") != std::string::npos,
+            "R-065: a GEOMETRIA perdeu o gate (loop ou caminho direto)");
+        EXPECT_MSG(code.find("!gldbg::g_masks.ui &&") != std::string::npos,
+                   "R-065: o ISOLAMENTO da UI sumiu (a sombra volta a ter "
+                   "dono desconhecido)");
+        EXPECT_MSG(code.find("gldbg::summaryLine(inv, sizeof(inv));") !=
+                       std::string::npos,
+                   "R-065: o boot deixou de logar o inventário GL");
+        EXPECT_MSG(code.find("APP_CMD_LOST_FOCUS") != std::string::npos,
+                   "R-065: o LOST_FOCUS deixou de ser logado");
+    }
+    // (3) a página de definições tem os toggles (a vara de medir do dono)
+    {
+        std::string src;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/ui/SettingsPage.cpp", src));
+        const std::string code = test::stripCppComments(src);
+        EXPECT_MSG(code.find("kDbgMasterId") != std::string::npos &&
+                       code.find("kDbgGridId") != std::string::npos,
+                   "R-065: os toggles de passe saíram das Definições");
+    }
+    // os CONTADORES vivem nas camadas (o nascer e o morrer contam)
+    {
+        std::string r;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/render/Renderer.cpp", r));
+        EXPECT_MSG(
+            test::stripCppComments(r).find("gldbg::onCreated(") !=
+                std::string::npos,
+            "R-065: o Renderer deixou de contar os recursos");
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/render/Material.cpp", r));
+        EXPECT_MSG(
+            test::stripCppComments(r).find("gldbg::onDestroyed(") !=
+                std::string::npos,
+            "R-065: o LitMaterial deixou de contar a morte");
+    }
+}

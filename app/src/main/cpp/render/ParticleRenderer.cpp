@@ -5,6 +5,7 @@
 // floats — nada) e NUNCA regenera: o count do draw é o maxParticles do
 // componente clampado ao buffer. O VS faz a física (ParticleShader.h).
 #include "render/ParticleRenderer.h"
+#include "render/GlDebug.h"   // 0.12-Z F0: contadores GL
 #include "components/ParticleEmitter.h"
 #include "assets/PngLoader.h"
 #include "assets/Assets.h"
@@ -49,6 +50,9 @@ GLuint compileShader(GLenum type, const char* src) {
 
 bool ParticleRenderer::init() {
     destroy();
+    gldbg::onCreated(gldbg::Kind::Program, 1);   // 0.12-Z F0
+    gldbg::onCreated(gldbg::Kind::Vao, 1);
+    gldbg::onCreated(gldbg::Kind::Buffer, 1);
     const GLuint vs = compileShader(GL_VERTEX_SHADER, fx::kVertexSrc);
     const GLuint fs = compileShader(GL_FRAGMENT_SHADER, fx::kFragmentSrc);
     if (!vs || !fs) {

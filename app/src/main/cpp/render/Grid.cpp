@@ -1,4 +1,5 @@
 #include "render/Grid.h"
+#include "render/GlDebug.h"   // 0.12-Z F0: contadores GL
 #include "platform/Log.h"
 #include <GLES3/gl3.h>
 
@@ -96,6 +97,9 @@ bool Grid::init(f32 extent, f32 step) {
         LOGE("Grid: parâmetros inválidos (extent=%f step=%f)", extent, step);
         return false;
     }
+    gldbg::onCreated(gldbg::Kind::Program, 1);   // 0.12-Z F0
+    gldbg::onCreated(gldbg::Kind::Vao, 1);
+    gldbg::onCreated(gldbg::Kind::Buffer, 1);
     if (extent < 2000.0f) {
         // guard da spec F3.1: com menos de 2000 a borda aparece no zoom máx
         LOGI("Grid: extent %.0f < 2000 — a borda pode aparecer no zoom máx", extent);
@@ -147,6 +151,9 @@ bool Grid::init(f32 extent, f32 step) {
 }
 
 void Grid::destroy() {
+    gldbg::onDestroyed(gldbg::Kind::Buffer, vbo_ ? 1 : 0);    // 0.12-Z F0
+    gldbg::onDestroyed(gldbg::Kind::Vao, vao_ ? 1 : 0);
+    gldbg::onDestroyed(gldbg::Kind::Program, prog_ ? 1 : 0);
     if (vbo_)  { glDeleteBuffers(1, &vbo_); vbo_ = 0; }
     if (vao_)  { glDeleteVertexArrays(1, &vao_); vao_ = 0; }
     if (prog_) { glDeleteProgram(prog_); prog_ = 0; }

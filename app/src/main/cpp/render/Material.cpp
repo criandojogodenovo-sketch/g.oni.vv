@@ -1,4 +1,5 @@
 #include "render/Material.h"
+#include "render/GlDebug.h"   // 0.12-Z F0: contadores GL
 #include "render/Texture.h"
 #include "render/Pbr.h"   // 0.12-Y: a fonte única das fórmulas PBR-lite
 #include "assets/GOwnFormats.h"   // 0.11-M: o GMeshMatProps do GTB2 (fromGMesh)
@@ -178,6 +179,8 @@ GLuint compileShader(GLenum type, const char* src) {
 
 bool LitMaterial::init() {
     destroy();
+    gldbg::onCreated(gldbg::Kind::Program, 1);   // 0.12-Z F0
+    gldbg::onCreated(gldbg::Kind::Buffer, 2);    // os 2 UBOs (bones+inst)
     const GLuint vs = compileShader(GL_VERTEX_SHADER, kVsSrc);
     const GLuint fs = compileShader(GL_FRAGMENT_SHADER, kFsSrc);
     if (!vs || !fs) {
@@ -254,6 +257,9 @@ bool LitMaterial::init() {
 }
 
 void LitMaterial::destroy() {
+    gldbg::onDestroyed(gldbg::Kind::Program, prog_ ? 1 : 0);   // 0.12-Z F0
+    gldbg::onDestroyed(gldbg::Kind::Buffer,
+                       (uboBones_ ? 1 : 0) + (uboInst_ ? 1 : 0));
     if (prog_) { glDeleteProgram(prog_); prog_ = 0; }
     if (uboBones_) { glDeleteBuffers(1, &uboBones_); uboBones_ = 0; }
     if (uboInst_) { glDeleteBuffers(1, &uboInst_); uboInst_ = 0; }

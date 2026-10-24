@@ -74,6 +74,19 @@ constexpr u64 kCopyBenchId   = 5832;  // 0.9.6 (G6): copiar o bloco de 9 linhas
 constexpr u64 kLayoutExpId   = 5833;  // 0.9.6.5 (GRUPO B): exportar layout
 constexpr u64 kLayoutAudId   = 5834;  // 0.9.6.5 (GRUPO B): auditoria do ecrã
 constexpr u64 kExpandNodesId = 5835;  // 0.10-M (EXT): toggle «expandir em sub-TICs»
+// 0.12-Z F0 — os INTERRUPTORES DE DEBUG POR PASSE (faixa 5840..5850; de
+// sessão — nunca persistidos; o master OFF = render normal byte a byte)
+constexpr u64 kDbgMasterId  = 5840;
+constexpr u64 kDbgSkyId     = 5841;
+constexpr u64 kDbgWorldId   = 5842;
+constexpr u64 kDbgGeomId    = 5843;
+constexpr u64 kDbgGridId    = 5844;
+constexpr u64 kDbgGizmoId   = 5845;
+constexpr u64 kDbgPostId    = 5846;   // no-op documentado (não há passe post)
+constexpr u64 kDbgUiId      = 5847;
+constexpr u64 kDbgGlassId   = 5848;
+constexpr u64 kDbgStateLogId= 5849;
+constexpr u64 kDbgErrLogId  = 5850;
 constexpr u64 kScrollId     = 49;    // região de scroll da página
 
 // ---- bits das secções (colapsáveis — PERSISTE via layout.json) --------------
@@ -120,6 +133,18 @@ enum Result {
     kCopyBench,        // 0.9.6 (G6): copiar o relatório (bloco de 9 linhas)
     kExportLayout,     // 0.9.6.5 (GRUPO B): exportar o layout (PNG+JSON)
     kAuditScreen,      // 0.9.6.5 (GRUPO B): auditoria do ecrã (validador+log)
+    // 0.12-Z F0 — os toggles do debug de passes (o main aplica em gldbg)
+    kDbgMaster,
+    kDbgSky,
+    kDbgWorld,
+    kDbgGeom,
+    kDbgGrid,
+    kDbgGizmo,
+    kDbgPost,
+    kDbgUi,
+    kDbgGlass,
+    kDbgStateLog,
+    kDbgErrLog,
 };
 
 // desenha a PÁGINA inteira (full-screen na banda do viewport) e processa os

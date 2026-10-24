@@ -1,4 +1,5 @@
 #include "ui/UiContext.h"
+#include "render/GlDebug.h"   // 0.12-Z F0: o toggle do vidro
 #include "ui/Fire.h"   // 0.12-D (D-3): as brasas paramétricas
 #include "ui/Glass.h"   // 0.12-D (D-2): o hash do ruído do vidro falso
 #include "ui/Noise2D.h"   // 0.12-E (E-3): o ruído 2D das bordas ativas
@@ -433,6 +434,11 @@ void UiContext::panelRoundedGradientV(f32 x, f32 y, f32 w, f32 h, f32 radius,
 // 0.11-Y (Y-1) — A LINHA DO TOPO DO VIDRO: 1dp com o RGB do glow a 20%
 // (o brilho do cristal; o chamador desenha DEPOIS do panelRounded/frame)
 void UiContext::glassTopLine(f32 x, f32 y, f32 w) {
+    // 0.12-Z F0: o toggle "vidro da UI" — com o mestre ON e o passe OFF a
+    // linha de brilho não desenha (o isolamento do dono; o resto igual)
+    if (gldbg::g_masks.master && !gldbg::g_masks.uiGlass) {
+        return;
+    }
     // 0.12-E (E-3 · FASE 3.1): a ordem do dono — «uma linha de 1px no
     // topo com a cor amber a 20% de opacidade (o reflexo da luz)». Era o
     // RGB do glow (#FF3D00) da Y-1; agora é o ÂMBAR (o accent #FFB020)

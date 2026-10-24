@@ -812,3 +812,26 @@ regress_weather + M-Yg1/M-Yg2 VERMELHAS AO VIVO → suíte 0 falhas
 medições — o CI é o árbitro) · gates VERDES · **versionCode 124** — o
 build vigente. O 123 fica INTACTO como história. (o relatório próprio:
 docs/RELATORIO-0.12-Y-F2-WEATHER.md)
+
+### §14-o — 0.12-Z F0 (o diagnóstico do contexto GL) — versionCode 125
+
+**G8** (o par declarado no MESMO commit, a regra do §14): a FASE 0 da
+campanha anti-perda de contexto OpenGL (o RELATORIO-0.12-Z-GLCTX.md §F0)
+não muda comportamento de render nenhum — entra a VARA DE MEDIR:
+render/GlDebug.h NOVO (os interruptores POR PASSE com o mestre OFF por
+defeito, os contadores de recursos GL por kind, o snapshot de estado à
+entrada/saída de cada passe, o glGetError por passe), os gates no frame
+real do main.cpp, o inventário GL no fim do boot, os timestamps de
+lifecycle no INIT/TERM/LOST_FOCUS/GAINED_FOCUS (os 2 últimos NOVOS) e os
+11 toggles nas Definições → Diagnóstico (de sessão, nunca persistidos).
+O §F0.3 do relatório fecha as 4 CANDIDATAS da sombra com ficheiro:linha
+(a H1: o scrim/sheet preso que cobre o ecrã inteiro E come os toques —
+EditorUi.cpp:3947/4086/4258 + main.cpp:7424 — é a que explica o
+conjunto inteiro de sintomas; os toggles fecham no device). O §F0.4
+analisa o clima/partículas «não funciona» (a causa mais provável: os
+presets do prompt são sub-pixel no C33 — 0.015 m ≈ 1.3 px a 720p/7 u;
+a decisão dos novos tamanhos é do dono). pins ×4 (tests/test_012z_ctx.cpp
+NOVO) + R-065 regress_glctx_fase0 + M-Z1/M-Z2 VERMELHAS AO VIVO ·
+test_core 0 falhas (GONI_SKIP dos flakes de disco documentados da
+sandbox — o CI é o árbitro) · gates VERDES · **versionCode 125** — o
+par declarado aqui e no build config (a regra do §14).

@@ -1,4 +1,5 @@
 #include "render/SkyRenderer.h"
+#include "render/GlDebug.h"   // 0.12-Z F0: contadores GL
 #include "platform/Log.h"
 #include <GLES3/gl3.h>
 
@@ -195,6 +196,9 @@ void SkyRenderer::use() const {
 
 bool SkyRenderer::init() {
     destroy();
+    gldbg::onCreated(gldbg::Kind::Program, 1);   // 0.12-Z F0
+    gldbg::onCreated(gldbg::Kind::Vao, 1);
+    gldbg::onCreated(gldbg::Kind::Buffer, 1);
     const GLuint vs = compileShader(GL_VERTEX_SHADER, kVsSrc);
     const GLuint fs = compileShader(GL_FRAGMENT_SHADER, kFsSrc);
     if (!vs || !fs) {

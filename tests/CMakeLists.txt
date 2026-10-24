@@ -72,6 +72,7 @@ add_executable(test_core
         # gizmo fora do mundo dos TICs com pai, o tamanho em píxel variável)
         # — o caminho REAL (o padrão do wiring087: inclui platform/main.cpp)
         test_012v_viewport.cpp
+        test_012z_ctx.cpp   // 0.12-Z F0: os pins do diagnóstico GL
         # F6: wiring do seletor de textura (dispatch puro + sequência do
         # main + bind no stub GL + round-trip .goni — o fix do C33 0.6.9)
         test_assetpick.cpp

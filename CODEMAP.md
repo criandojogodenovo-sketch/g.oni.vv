@@ -80,7 +80,8 @@ Atualizado: 2026-10-24 · vc: 124
   AmbientEnvironment ATIVO em STORM), ParticleRenderer.{h,cpp} +
   ParticleShader.h (**0.12-Y-F1**: as partículas GPU; **0.12-Y-F2**: o
   uWind — o vento GLOBAL do 1.º WindTIC ATIVO, a sobrecarga pura
-  particlePos com vento),
+  particlePos com vento), GlDebug.h (**0.12-Z F0**: o DIAGNÓSTICO do
+  contexto GL — toggles POR PASSE, contadores, estado por passe),
   **0.12-D (DORMENTE desde a 0.12-E)**: D-1 o SdfBatch.h + o 3.º
   PROGRAMA progSdf_ (o FS replica o app/src/main/cpp/ui/Sdf.h LINHA A
   LINHA; runs pelo flag `sdf`) + D-3 o ramo FOGO-ONLY replicando o

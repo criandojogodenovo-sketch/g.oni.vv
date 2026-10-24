@@ -1,4 +1,5 @@
 #include "render/Mesh.h"
+#include "render/GlDebug.h"   // 0.12-Z F0: contadores GL
 #include "platform/Log.h"
 #include <GLES3/gl3.h>
 #include <cstddef>   // offsetof
@@ -59,6 +60,8 @@ bool Mesh::createSkinned(const Vertex* vertices, u32 vertexCount,
         boundsMax_ = mx;
     }
 
+    gldbg::onCreated(gldbg::Kind::Vao, 1);         // 0.12-Z F0
+    gldbg::onCreated(gldbg::Kind::Buffer, 2);
     glGenVertexArrays(1, &vao_);
     glGenBuffers(1, &vbo_);
     glGenBuffers(1, &ebo_);
@@ -95,6 +98,7 @@ bool Mesh::createSkinned(const Vertex* vertices, u32 vertexCount,
     // 0.8.2: skin VBO — 8 floats por vértice (joints float + weights)
     if (joints && weights) {
         glGenBuffers(1, &skinVbo_);
+        gldbg::onCreated(gldbg::Kind::Buffer, 1);   // 0.12-Z F0 (skin)
         if (!skinVbo_) {
             LOGE("Mesh: falha ao criar o VBO de skin");
             destroy();
@@ -130,6 +134,12 @@ bool Mesh::createSkinned(const Vertex* vertices, u32 vertexCount,
 }
 
 void Mesh::destroy() {
+    // 0.12-Z F0: o inventário da morte (vbo+ebo sempre que há vao; o skin
+    // soma o seu próprio buffer)
+    if (vao_) {
+        gldbg::onDestroyed(gldbg::Kind::Vao, 1);
+        gldbg::onDestroyed(gldbg::Kind::Buffer, skinVbo_ ? 3 : 2);
+    }
     if (ebo_) { glDeleteBuffers(1, &ebo_); ebo_ = 0; }
     if (skinVbo_) { glDeleteBuffers(1, &skinVbo_); skinVbo_ = 0; }   // 0.8.2
     if (vbo_) { glDeleteBuffers(1, &vbo_); vbo_ = 0; }

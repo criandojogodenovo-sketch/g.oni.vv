@@ -1,4 +1,5 @@
 #include "ui/FontAtlas.h"
+#include "render/GlDebug.h"   // 0.12-Z F0: contadores GL
 #include <GLES3/gl3.h>
 #include <cstdio>
 #include <cstring>
@@ -75,6 +76,7 @@ bool readFile(const char* path, std::vector<u8>* out) {
 u32 makeTexture(const u8* bitmap, i32 w, i32 h) {
     GLuint tex = 0;
     glGenTextures(1, &tex);
+    gldbg::onCreated(gldbg::Kind::Texture, 1);   // 0.12-Z F0
     glBindTexture(GL_TEXTURE_2D, tex);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, bitmap);
@@ -102,6 +104,7 @@ void FontAtlas::destroy() {
     // bake + glTexImage2D + métricas. Sem isto, o guard `if (tex_)` saltava
     // o re-upload e os glifos saíam brancos ("cubinhos" do C33).
     if (tex_ != 0) {
+        gldbg::onDestroyed(gldbg::Kind::Texture, 1);   // 0.12-Z F0
         glDeleteTextures(1, &tex_);
         tex_ = 0;
     }

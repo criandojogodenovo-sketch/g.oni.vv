@@ -192,6 +192,18 @@ typedef intptr_t      GLintptr;      // 0.11-S: o offset do glBufferSubData
 #define GL_CULL_FACE 0x0B44
 #define GL_DEPTH_WRITEMASK 0x0B72
 #define GL_LESS 0x0201
+// 0.12-Z F0: o inventário de ESTADO do gldbg (o hospedeiro responde o
+// "desligado/zero" estável — os pins aferem a FORMA, o device aferra os
+// valores reais do driver)
+#define GL_VIEWPORT 0x0BA2
+#define GL_SCISSOR_TEST 0x0C11
+#define GL_BLEND 0x0BE2
+#define GL_DEPTH_TEST 0x0B71
+#define GL_DEPTH_FUNC 0x0B74
+#define GL_FRAMEBUFFER_BINDING 0x8CA6
+#define GL_NO_ERROR 0
+#define GL_NEVER 0x0200
+#define GL_ALWAYS 0x0207
 
 inline void glGenTextures(GLint n, GLuint* t) {
     glstub::stats.genTextures += (int)n;
@@ -243,6 +255,7 @@ inline const GLubyte* glGetString(GLenum name) {
     return reinterpret_cast<const GLubyte*>("");
 }
 inline void glGetIntegerv(GLenum p, GLint* v) { if (v) *v = 0; }
+inline GLboolean glIsEnabled(GLenum) { return GL_FALSE; }   // 0.12-Z F0
 inline const GLubyte* glGetStringi(GLenum, GLuint index) {
     if (glstub::astcLdr && index == 0) {
         return reinterpret_cast<const GLubyte*>(

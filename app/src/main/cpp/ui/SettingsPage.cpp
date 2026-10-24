@@ -5,6 +5,7 @@
 // só-leitura em text-2. O scroll (id 49) revela o fundo; o BACK (56dp, ícone
 // seta) devolve ao editor SEM tocar na seleção.
 #include "ui/SettingsPage.h"
+#include "render/GlDebug.h"   // 0.12-Z F0: os toggles de passe
 #include "ui/EditorUi.h"
 #include "ui/UiContext.h"
 #include "ui/Strings.h"   // 0.9.6.18 (D4): a tabela localizada
@@ -399,6 +400,69 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
         infoRow(ui, ox, y, aw, "armazenamento",
                 ctx.storageMode[0] ? ctx.storageMode : "-");
         y += settingsRowH();
+        // 0.12-Z F0 — os INTERRUPTORES POR PASSE (o mestre desligado por
+        // defeito = render normal; com o mestre ON, só os passes ligados
+        // desenham — "tudo off menos a grelha" mostra sempre a grelha). A
+        // toolbar do topo e ESTA página ficam SEMPRE vivas (a via de escape)
+        if (toggleRow(ui, kDbgMasterId, ox, y, aw, "debug passes (mestre)",
+                      gldbg::g_masks.master)) {
+            res = kDbgMaster;
+        }
+        y += settingsRowH();
+        if (gldbg::g_masks.master) {
+            if (toggleRow(ui, kDbgSkyId, ox, y, aw, "passe: fundo/céu",
+                          gldbg::g_masks.sky)) {
+                res = kDbgSky;
+            }
+            y += settingsRowH();
+            if (toggleRow(ui, kDbgWorldId, ox, y, aw,
+                          "passe: WorldEnvironment",
+                          gldbg::g_masks.worldEnv)) {
+                res = kDbgWorld;
+            }
+            y += settingsRowH();
+            if (toggleRow(ui, kDbgGeomId, ox, y, aw, "passe: geometria",
+                          gldbg::g_masks.geometry)) {
+                res = kDbgGeom;
+            }
+            y += settingsRowH();
+            if (toggleRow(ui, kDbgGridId, ox, y, aw, "passe: grelha",
+                          gldbg::g_masks.grid)) {
+                res = kDbgGrid;
+            }
+            y += settingsRowH();
+            if (toggleRow(ui, kDbgGizmoId, ox, y, aw, "passe: gizmos",
+                          gldbg::g_masks.gizmos)) {
+                res = kDbgGizmo;
+            }
+            y += settingsRowH();
+            if (toggleRow(ui, kDbgPostId, ox, y, aw,
+                          "passe: pós (não existe)", gldbg::g_masks.post)) {
+                res = kDbgPost;
+            }
+            y += settingsRowH();
+            if (toggleRow(ui, kDbgUiId, ox, y, aw,
+                          "passe: UI (toolbar fica)",
+                          gldbg::g_masks.ui)) {
+                res = kDbgUi;
+            }
+            y += settingsRowH();
+            if (toggleRow(ui, kDbgGlassId, ox, y, aw, "passe: vidro da UI",
+                          gldbg::g_masks.uiGlass)) {
+                res = kDbgGlass;
+            }
+            y += settingsRowH();
+            if (toggleRow(ui, kDbgStateLogId, ox, y, aw,
+                          "log: estado GL por passe", gldbg::g_stateLog)) {
+                res = kDbgStateLog;
+            }
+            y += settingsRowH();
+            if (toggleRow(ui, kDbgErrLogId, ox, y, aw,
+                          "log: glGetError por passe", gldbg::g_errorLog)) {
+                res = kDbgErrLog;
+            }
+            y += settingsRowH();
+        }
     }
 
     // ---- DOCS (0.9.0: a secção EXISTE sem a linha — entra na 0.9.2) ----------

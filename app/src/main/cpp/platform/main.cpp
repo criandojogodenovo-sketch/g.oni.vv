@@ -65,6 +65,7 @@
 #include "platform/BuildInfo.h"   // 0.8.10: identidade (banner/dumps)
 #include "platform/CrashHandler.h"
 #include "platform/EglContext.h"
+#include "render/GlDebug.h"   // 0.12-Z F0: o diagnóstico do contexto GL
 #include "platform/FileApi.h"
 #include "platform/InputState.h"
 #include "platform/StorageBridge.h"
@@ -3783,6 +3784,7 @@ bool browserImportFile(const fileapi::DirEntry& e) {
 // contexto ainda corrente) e re-criado/re-uploaded no init.
 u32 g_windowInits = 0;   // APP_CMD_INIT_WINDOW vistos nesta execução
 u32 g_windowTerms = 0;   // APP_CMD_TERM_WINDOW vistos (contexto morto)
+double g_bootTime = 0.0; // 0.12-Z F0: a origem dos timestamps de lifecycle
 
 void showToast(const char* msg) {
     std::snprintf(g_toast, sizeof(g_toast), "%s", msg);
@@ -5388,11 +5390,12 @@ void onAppCmd(android_app* app, i32 cmd) {
             const bool contextRecreated = (g_windowTerms > 0);
             ++g_windowInits;
             if (contextRecreated) {
-                elog::warn("lifecycle: INIT_WINDOW #%u — contexto EGL "
-                           "RE-CRIADO (janela re-aberta sem matar a app; "
-                           "recursos GL do ciclo anterior foram libertos "
-                           "no TERM_WINDOW #%u — re-upload de tudo)",
-                           g_windowInits, g_windowTerms);
+                elog::warn("lifecycle: INIT_WINDOW #%u (+%.2fs desde o "
+                           "boot) — contexto EGL RE-CRIADO (janela re-aberta "
+                           "sem matar a app; recursos GL do ciclo anterior "
+                           "foram libertos no TERM_WINDOW #%u — re-upload de "
+                           "tudo)", g_windowInits, nowSeconds() - g_bootTime,
+                           g_windowTerms);
             }
             // F5.1-hotfix: boot em passos numerados — cada passo escreve
             // "[boot N/6] <nome> OK/FALHOU" no engine.log. A ordem dentro
@@ -5572,6 +5575,13 @@ void onAppCmd(android_app* app, i32 cmd) {
             }
             g_ready = true;
             logBootMemory("fim do boot");
+            {
+                // 0.12-Z F0: o INVENTÁRIO GL do boot — quantos recursos
+                // cada ciclo criou/destruiu (o dono compara term↔init)
+                char inv[160];
+                gldbg::summaryLine(inv, sizeof(inv));
+                elog::info("lifecycle: recursos GL do processo: %s", inv);
+            }
             elog::info("boot: janela pronta %dx%d", (int)g_egl.width(), (int)g_egl.height());
             break;
         }
@@ -5687,6 +5697,9 @@ void onAppCmd(android_app* app, i32 cmd) {
                 }
                 g_egl.shutdown();            // POR FIM: surface + contexto morrem
                 ++g_windowTerms;
+                elog::info("lifecycle: TERM_WINDOW #%u (+%.2fs desde o "
+                           "boot) — contexto EGL destruído",
+                           g_windowTerms, nowSeconds() - g_bootTime);
                 elog::info("lifecycle: TERM_WINDOW #%u — contexto EGL destruído; "
                            "libertados: %u mesh(es) gpu, %u textura(s) gpu, "
                            "atlas da fonte (re-bake no próximo init), %u "
@@ -5694,6 +5707,14 @@ void onAppCmd(android_app* app, i32 cmd) {
                            "assumido vivo no próximo INIT_WINDOW",
                            g_windowTerms, gpuMeshes, gpuTextures, detached);
             }
+            break;
+        case APP_CMD_LOST_FOCUS:   // 0.12-Z F0: o log que não existia
+            elog::info("lifecycle: LOST_FOCUS (+%.2fs desde o boot)",
+                       nowSeconds() - g_bootTime);
+            break;
+        case APP_CMD_GAINED_FOCUS:
+            elog::info("lifecycle: GAINED_FOCUS (+%.2fs desde o boot)",
+                       nowSeconds() - g_bootTime);
             break;
         case APP_CMD_DESTROY:
             g_ready = false;
@@ -5733,6 +5754,17 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
     g_blockFrame = BlockFrameStats{};   // as métricas DO frame (HUD/log)
     g_skinFrame = SkinFrameStats{};
     g_impFrame = ImpostorFrameStats{};
+    // 0.12-Z F0 — OS INTERRUPTORES POR PASSE: com o mestre OFF o render é
+    // o de SEMPRE (cada show* é true — os gates abaixo são mortos). Com o
+    // mestre ON, só os passes ligados desenham (o isolamento do dono).
+    const bool dbg = gldbg::g_masks.master;
+    const bool showEnv  = !dbg || gldbg::g_masks.worldEnv;
+    const bool showSky  = !dbg || gldbg::g_masks.sky;
+    const bool showGeom = !dbg || gldbg::g_masks.geometry;
+    const bool showPart = !dbg || gldbg::g_masks.geometry ||
+                          gldbg::g_masks.post;   // as partículas pertencem ao
+                          // bloco 3D (o toggle "pós" é no-op; a geometria manda)
+    const gldbg::PassState passIn = gldbg::capture();
     const ComponentStore& comps = g_scene.components();
     // 0.12-Y (3.Y-C): o WORLDENVIRONMENT do frame (o 1.º ATIVO manda — o
     // invariante da câmara ativa). O CÉU é o clear (sobreposto ao token),
@@ -5743,7 +5775,10 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
     {
         const Environment* env = nullptr;
         const auto& envs = comps.environments();
-        for (u32 i = 0; i < envs.size(); ++i) {
+        // 0.12-Z F0: com o passe mascarado, a cena corre COMO SE não
+        // houvesse Environment (o clear/luz/sky de fábrica) — o dono vê
+        // o que o WE acrescenta isolado
+        for (u32 i = 0; showEnv && i < envs.size(); ++i) {
             const Tic* t = g_scene.get(envs.owner(i));
             if (t && t->active && envs.at(i).active) {
                 env = &envs.at(i);
@@ -5791,7 +5826,8 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
             // clear de sempre (o quad NEM EXISTE no frame — byte a byte).
             // 0.12-Y-E — O CICLO DIA/NOITE: as cores chegam JÁ graduadas
             // (a grade acima corre no CPU 1× por frame, nunca por pixel).
-            if (skyCyc && g_sky.ok()) {
+            if (skyCyc && g_sky.ok() && showSky) {
+                const gldbg::PassState skyIn = gldbg::capture();   // 0.12-Z F0
                 SkyRenderer::Params sp;
                 sky::viewBasis(view, sp.right, sp.up, sp.fwd);
                 sp.aspect = sky::aspectFromProj(proj);
@@ -5809,6 +5845,8 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
                     sp.sunDir[i] = sunDirNow[i];
                 }
                 g_sky.draw(sp);
+                gldbg::passBoundary("ceu", skyIn, gldbg::capture());
+                gldbg::checkErrors("ceu");
             }
         }
         const f32 density = env ? env->fogDensity : 0.0f;
@@ -5910,7 +5948,7 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
                std::memcmp(a.tint, b.tint, 3 * sizeof(f32)) == 0;
     };
 
-    for (u32 i = 0; i < mrs.size(); ++i) {
+    for (u32 i = 0; showGeom && i < mrs.size(); ++i) {
         const MeshRenderer& mr = mrs.at(i);
         if (!mr.mesh && !mr.blocks) {
             continue;   // sem mesh (tag "none" de cena antiga) — nada a desenhar
@@ -6083,8 +6121,12 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
             g_skinFrame.any = true;
             nBones = computeSkinMatrices(*sk, bones, SkeletonComp::kMaxBones);
         }
-        st = st + g_renderer.drawMesh(*mr.mesh, model, vp, mr.texture, mr.tint,
-                                      nBones > 0 ? bones : nullptr, nBones);
+        if (showGeom) {   // 0.12-Z F0: o caminho DIRETO respeita o toggle
+            st = st + g_renderer.drawMesh(*mr.mesh, model, vp, mr.texture,
+                                          mr.tint,
+                                          nBones > 0 ? bones : nullptr,
+                                          nBones);
+        }
     }
 
     // ---- 0.11-W (3.5b): o AGRUPAMENTO dos opacos ------------------------
@@ -6261,7 +6303,10 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
             }
         }
     }
-    if (g_particles.ok()) {
+    gldbg::passBoundary("geometria", passIn, gldbg::capture());   // 0.12-Z F0
+    gldbg::checkErrors("geometria");
+    if (g_particles.ok() && showPart) {
+        const gldbg::PassState partIn = gldbg::capture();   // 0.12-Z F0
         const auto& pes = comps.particleEmitters();
         for (u32 i = 0; i < pes.size(); ++i) {
             const Tic* pt = g_scene.get(pes.owner(i));
@@ -6318,7 +6363,11 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
             const DrawStats ds = g_particles.draw(pp);
             st = st + ds;
         }
+        gldbg::passBoundary("particulas", partIn, gldbg::capture());
+        gldbg::checkErrors("particulas");
     }
+    gldbg::passBoundary("pass3D", passIn, gldbg::capture());   // 0.12-Z F0
+    gldbg::checkErrors("pass3D");
     return st;
 }
 
@@ -7176,7 +7225,14 @@ void frame() {
                        g_impFrame.drawn);
         }
     }
-    const DrawStats stGrid = g_grid.draw(vp, camEye, camFocus);
+    // 0.12-Z F0: a GRELHA respeita o toggle (com "tudo off menos a
+    // grelha" ela tem de aparecer SEMPRE — o pin isola)
+    const bool showGrid = !gldbg::g_masks.master || gldbg::g_masks.grid;
+    const gldbg::PassState gridIn = gldbg::capture();
+    const DrawStats stGrid = showGrid ? g_grid.draw(vp, camEye, camFocus)
+                                      : DrawStats{};
+    gldbg::passBoundary("grelha", gridIn, gldbg::capture());
+    gldbg::checkErrors("grelha");
     if (scissor3d) {
         glDisable(GL_SCISSOR_TEST);   // a UI nunca é recortada (beginUiPass
                                       // também repõe — defesa em camadas)
@@ -7435,8 +7491,10 @@ void frame() {
                           g_camera.eye(), viewRect.w, viewRect.h,
                           viewRect.x, viewRect.y);
     }
-    if (!modalOpen && gizmo::visible(g_editor.playMode || g_editor.uiMode,
-                                     gizmoTr != nullptr)) {
+    if (!modalOpen &&
+        (!gldbg::g_masks.master || gldbg::g_masks.gizmos) &&
+        gizmo::visible(g_editor.playMode || g_editor.uiMode,
+                       gizmoTr != nullptr)) {
         // GRUPO D: o gizmo desenha RETO-LOCAL + origem (consistente com o
         // feedGizmo e o aspect do rect)
         // 0.12-V — O MESMO par (mundo, comprimento) do feedGizmo: a origem
@@ -7490,6 +7548,23 @@ void frame() {
             // 0.9.0 (spec I): o gear abre a PÁGINA de Settings
             g_editor.settingsMenu = true;
             elog::info("ui: pagina de settings aberta (gear)");
+        }
+
+        // 0.12-Z F0 — O ISOLAMENTO DA UI: com o passe mascarado, SÓ a
+        // toolbar do topo (a via de escape) + a página de Settings + o
+        // toast desenham. Os painéis (hierarquia/inspector/bottom/vpchrome/
+        // menus/sheets) NÃO desenham nem recebem toques (não desenhado =
+        // não interativo — immediate-mode). A testemunha do dono: ligar um
+        // passe de cada vez e ver QUANDO a sombra aparece.
+        if (gldbg::g_masks.master && !gldbg::g_masks.ui &&
+            !g_editor.settingsMenu) {
+            drawToast();
+            statusLine(st3d, stGrid);
+            g_ui.endFrame();                       // submete solids + glyphs
+            g_lastUiStats = g_renderer.endFrame(); // UI por cima do 3D
+            g_egl.swap();
+            g_input.clearEdges();
+            return;
         }
 
         // ---- 0.9.0 — CHROME DO VIEWPORT (spec D): stack + toolbar inf. +
@@ -7733,6 +7808,65 @@ void frame() {
                            "fim do próximo frame)");
                 break;
             }
+            // ---- 0.12-Z F0 — OS TOGGLES DO DEBUG DE PASSES (o mestre OFF =
+            // render normal; a sessão nunca persiste nada disto) ------------
+            case editor::settings::kDbgMaster: {
+                gldbg::g_masks.master = !gldbg::g_masks.master;
+                showToast(gldbg::g_masks.master ? "debug passes: ON"
+                                                : "debug passes: OFF (normal)");
+                elog::info("gldebug: mestre=%s", gldbg::g_masks.master
+                                                     ? "on" : "off");
+                break;
+            }
+            case editor::settings::kDbgSky:
+                gldbg::g_masks.sky = !gldbg::g_masks.sky;
+                showToast(gldbg::g_masks.sky ? "céu: ON" : "céu: OFF");
+                break;
+            case editor::settings::kDbgWorld:
+                gldbg::g_masks.worldEnv = !gldbg::g_masks.worldEnv;
+                showToast(gldbg::g_masks.worldEnv ? "WorldEnvironment: ON"
+                                                  : "WorldEnvironment: OFF");
+                break;
+            case editor::settings::kDbgGeom:
+                gldbg::g_masks.geometry = !gldbg::g_masks.geometry;
+                showToast(gldbg::g_masks.geometry ? "geometria: ON"
+                                                  : "geometria: OFF");
+                break;
+            case editor::settings::kDbgGrid:
+                gldbg::g_masks.grid = !gldbg::g_masks.grid;
+                showToast(gldbg::g_masks.grid ? "grelha: ON" : "grelha: OFF");
+                break;
+            case editor::settings::kDbgGizmo:
+                gldbg::g_masks.gizmos = !gldbg::g_masks.gizmos;
+                showToast(gldbg::g_masks.gizmos ? "gizmos: ON"
+                                                : "gizmos: OFF");
+                break;
+            case editor::settings::kDbgPost:
+                // no-op DOCUMENTADO: o motor não tem passe de pós (0 FBOs)
+                showToast("pós: não existe no motor (0 FBOs)");
+                break;
+            case editor::settings::kDbgUi:
+                gldbg::g_masks.ui = !gldbg::g_masks.ui;
+                showToast(gldbg::g_masks.ui ? "UI: ON" : "UI: OFF (toolbar fica)");
+                break;
+            case editor::settings::kDbgGlass:
+                gldbg::g_masks.uiGlass = !gldbg::g_masks.uiGlass;
+                showToast(gldbg::g_masks.uiGlass ? "vidro: ON" : "vidro: OFF");
+                break;
+            case editor::settings::kDbgStateLog:
+                gldbg::g_stateLog = !gldbg::g_stateLog;
+                showToast(gldbg::g_stateLog ? "log estado: ON"
+                                            : "log estado: OFF");
+                elog::info("gldebug: log de estado=%s", gldbg::g_stateLog
+                                                            ? "on" : "off");
+                break;
+            case editor::settings::kDbgErrLog:
+                gldbg::g_errorLog = !gldbg::g_errorLog;
+                showToast(gldbg::g_errorLog ? "log erros GL: ON"
+                                            : "log erros GL: OFF");
+                elog::info("gldebug: log de erros=%s", gldbg::g_errorLog
+                                                           ? "on" : "off");
+                break;
             case editor::settings::kOpenTextWindow: {
                 // 0.9.1 — o Settings fecha e a janela de texto fica COMO
                 // modal único (sem duplo-dispatch do mesmo toque nos dois
@@ -9186,6 +9320,7 @@ void frame() {
 } // namespace
 
 void android_main(android_app* app) {
+    g_bootTime = nowSeconds();   // 0.12-Z F0: os timestamps de lifecycle
     // F5.1-hotfix: log DUPLO (logcat + ficheiro) desde a 1ª linha.
     // O boot ainda não tem os paths da activity? O elog usa o fallback
     // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
