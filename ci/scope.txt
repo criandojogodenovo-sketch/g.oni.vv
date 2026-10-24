@@ -68,5 +68,6 @@ tests/stub-real/EGL/egl.h
 tests/stub-real/EGL/eglplatform.h
 scripts/build_raster.py
 tests/raster_z2.cpp
+tests/test_012z2_f3.cpp
 docs/RELATORIO-0.12-Z2-RASTER.md
 docs/capturas-0.12-Z2/

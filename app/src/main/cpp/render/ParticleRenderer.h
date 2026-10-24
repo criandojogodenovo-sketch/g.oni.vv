@@ -47,6 +47,12 @@ public:
         f32  endCol[4]   = {0.9f, 0.15f, 0.05f, 1};
         i32  maxParticles = 500;      // o COUNT do draw (o teto do buffer)
         bool hasTex   = false;
+        // 0.12-Z2 F3 — o CLIMA VISÍVEL: a escala do volume de spawn
+        // (spawnRadius/kSpawnRadius; 1.0 = o jorro da F1 byte a byte) e o
+        // piso em píxeis (fx::minWorldPerDepth; 0.0 = o piso MORTO — o
+        // tamanho da vida puro)
+        f32  spawnScale = 1.0f;
+        f32  minWorldPerDepth = 0.0f;
     };
 
     DrawStats draw(const Params& p) const;
@@ -70,6 +76,15 @@ private:
     i32 locGrav_ = -1;
     i32 locWind_ = -1;   // 0.12-Y-F2: uWind (3f — o uTime continua o
                          // ÚLTIMO 1f do draw: o contrato do pin intacto)
+    i32 locSpawnScale_ = -1;   // 0.12-Z2 F3: o volume (1f, antes do uTime)
+    i32 locMinW_ = -1;         // 0.12-Z2 F3: o piso em píxeis (1f, idem)
+    i32 locLifetime_ = -1;     // 0.12-Z2 F3: O ACHADO P0 — o uLifetime
+                               // NUNCA era carregado (o uniform ficava 0.0
+                               // → mod(x,0)=NaN → TODOS os vértices morrem
+                               // no clip — o sistema não desenhava NENHUM
+                               // píxel no driver real desde a F1; o stub
+                               // do CI não apanha — conta draws, não
+                               // fragmentos)
     i32 locStartSize_ = -1;
     i32 locEndSize_ = -1;
     i32 locStartCol_ = -1;

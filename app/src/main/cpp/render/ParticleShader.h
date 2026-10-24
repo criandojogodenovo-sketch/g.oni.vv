@@ -16,6 +16,25 @@
 //                       + (0.5 * gravity * localTime * localTime)
 //                       + (uWind * localTime);   ← 0.12-Y-F2: O VENTO
 //   float lifeProgress = localTime / lifetime;
+//
+// 0.12-Z2 FASE 3 — O CLIMA VISÍVEL (os 3 achados do F0.4 fechados):
+//   1. O TAMANHO MÍNIMO EM PÍXEIS: os presets do clima (0.015 m) medem
+//      ~1.3 px a 720p/dist 7 — SUB-PIXEL, invisível no device. O VS ganha
+//      uMinWorldPerDepth: o tamanho da vida entra num max() com o
+//      tamanho-mundo que projeta EXATAMENTE kMinParticlePx píxeis à
+//      profundidade do CENTRO da partícula (gl_Position.w do centro; a
+//      padronização da casa: depth-independente na orto). A pura
+//      fx::minWorldPerDepth é o contrato (o pin aferra a conta).
+//   2. O EMISSOR SEGUE A CÂMARA: o clima vive À VOLTA do observador — o
+//      draw do TIC com AmbientEnvironment ativo usa a origem
+//      fx::followOrigin (eye + lift = raio·0.5, o volume do mundo) e o
+//      volume de spawn escala por uSpawnScale = spawnRadius/0.15 (o
+//      buffer de seeds nasce unitário·kSpawnRadius e NUNCA regenera).
+//   3. O ORÇAMENTO DO FPS: fx::WeatherBudget — a EMA do frame real
+//      abaixo de 50 fps degrada o COUNT dos emissores do clima (×0.85
+//      por passo, piso 0.25); acima de 58 fps recupera (o histerético).
+//      O mecanismo é provado por pin com dt sintético; os números do
+//      Mali GE8320 entram na VERIFICAÇÃO NO DISPOSITIVO.
 #include "core/Types.h"
 #include <cmath>
 #include <cstring>
@@ -114,6 +133,114 @@ inline f32 particleSize(f32 startSize, f32 endSize, f32 prog) {
     return startSize + (endSize - startSize) * prog;
 }
 
+// ---- 0.12-Z2 FASE 3: O TAMANHO MÍNIMO EM PÍXEIS ---------------------------
+// o piso do dono (2–3 px a 720p): 3.0 — a gota de 0.015 m a 720p/dist 7
+// media ~1.3 px (o F0.4 PROVADO: invisível); 3 px é o piso visível no
+// Mali GE8320 do alvo
+inline constexpr f32 kMinParticlePx = 3.0f;
+
+// o fator da casa (o MESMO literal dos deg2rad da ui/ e do anim — a
+// conversão graus→rad aferrada)
+inline constexpr f32 kDegToRad = 0.01745329252f;
+
+// o tamanho-MUNDO que projeta minPx píxeis a 1 unidade de profundidade:
+// px = mundo·viewH / (2·d·tanHalf) → mundo(d=1) = minPx·2·tanHalf/viewH.
+// O VS multiplica pela profundidade REAL (gl_Position.w do centro) —
+// max(szVida, isto·w). viewHPx ≤ 0 ou tanHalf ≤ 0 = PISO MORTO (0.0 —
+// o caminho de sempre byte a byte; a orto usa minWorldOrtho).
+inline f32 minWorldPerDepth(f32 minPx, f32 tanHalfFovY, f32 viewHPx) {
+    if (viewHPx <= 0.0f || tanHalfFovY <= 0.0f) {
+        return 0.0f;
+    }
+    return minPx * 2.0f * tanHalfFovY / viewHPx;
+}
+
+// a ORTO (o w do clip fica 1.0 em qualquer profundidade): o tamanho-mundo
+// de minPx píxeis é CONSTANTE = minPx·2·meiaAltura/viewH (o orthoSize do
+// CameraComp é a meia-altura do mundo)
+inline f32 minWorldOrtho(f32 minPx, f32 orthoHalfH, f32 viewHPx) {
+    if (viewHPx <= 0.0f || orthoHalfH <= 0.0f) {
+        return 0.0f;
+    }
+    return minPx * 2.0f * orthoHalfH / viewHPx;
+}
+
+// o tanHalf do FOV EM GRAUS (o CameraComp fala graus; a orbit radianos —
+// as duas pontas passam o tanHalf JÁ convertido a esta pura; esta é para
+// o caminho de cena do gameProj: deg2rad da casa)
+inline f32 tanHalfFovDeg(f32 fovDeg) {
+    return std::tan(fovDeg * kDegToRad * 0.5f);
+}
+
+// ---- 0.12-Z2 FASE 3: O EMISSOR SEGUE A CÂMARA -----------------------------
+// a origem do clima: ALVO + lift (o volume de spawn centrado ACIMA do
+// ponto que a câmara OLHA — a chuva nasce a cair e atravessa a vista; o
+// lift = raio·0.5 deixa metade do volume acima do alvo e a queda da vida
+// inteira cobre a coluna. O ALVO é do chamador: no editor é o target da
+// orbit, em Play é eye + fwd·meio-volume — o clima vive À VOLTA do que o
+// observador OLHA, não do olho (a 1.ª run do --clima PROVOU que o olho
+// põe o volume fora do frustum descendente))
+inline void followOrigin(const f32 aim[3], f32 spawnRadius, f32 out[3]) {
+    out[0] = aim[0];
+    out[1] = aim[1] + spawnRadius * 0.5f;
+    out[2] = aim[2];
+}
+
+// a escala do volume: o buffer de seeds nasce com a origem unitária
+// ×kSpawnRadius (0.15) e NUNCA regenera — o raio do emissor escala o
+// offset no VS. O raio default (0.15) devolve 1.0 = o caminho da F1
+// byte a byte.
+inline f32 spawnScale(f32 spawnRadius, f32 seedRadius) {
+    return (seedRadius > 1e-6f) ? spawnRadius / seedRadius : 1.0f;
+}
+
+// ---- 0.12-Z2 FASE 3: O ORÇAMENTO DO FPS -----------------------------------
+// o count dos emissores do CLIMA degrada quando o frame real passa do
+// orçamento (a EMA abaixo de 50 fps — o piso do dono) e recupera acima
+// de 58 (o histerético evita o dente-de-serra à beira do limite). Os
+// emissores do UTILIZADOR (sem AmbientEnvironment) nunca são tocados.
+struct WeatherBudget {
+    static constexpr f32 kFpsFloor   = 50.0f;  // abaixo disto degrada
+    static constexpr f32 kFpsRecover = 58.0f;  // acima disto recupera
+    static constexpr f32 kScaleMin   = 0.25f;  // o piso do count (25%)
+    static constexpr f32 kStep       = 0.85f;  // ×0.85 por passo (e /0.85
+                                               // na recuperação)
+    static constexpr f32 kEmaAlpha   = 0.1f;   // o peso do frame novo
+
+    f32 scale = 1.0f;
+    f32 emaDt = 1.0f / 60.0f;   // a EMA do dt (o frame real)
+
+    // um passo por frame (dt do relógio real; dt ≤ 0 = congelado — o
+    // harness/pausa não mexe no orçamento)
+    void step(f32 dt) {
+        if (dt <= 0.0f) {
+            return;
+        }
+        emaDt = emaDt * (1.0f - kEmaAlpha) + dt * kEmaAlpha;
+        const f32 fps = 1.0f / emaDt;
+        if (fps < kFpsFloor) {
+            const f32 s = scale * kStep;
+            scale = s > kScaleMin ? s : kScaleMin;
+        } else if (fps > kFpsRecover && scale < 1.0f) {
+            const f32 s = scale / kStep;
+            scale = s < 1.0f ? s : 1.0f;
+        }
+    }
+
+    // o count do frame: o teto do componente × a escala (arredondado;
+    // nunca acima do pedido, nunca negativo)
+    i32 count(i32 requested) const {
+        if (requested <= 0) {
+            return 0;
+        }
+        const f32 c = static_cast<f32>(requested) * scale;
+        i32 n = static_cast<i32>(c + 0.5f);
+        if (n < 1) n = 1;             // a escala degrada o COUNT, não mata
+        if (n > requested) n = requested;
+        return n;
+    }
+};
+
 // a COR interpolada pela vida (RGBA)
 inline void particleColor(const f32 start[4], const f32 end[4], f32 prog,
                           f32 out[4]) {
@@ -139,6 +266,8 @@ inline constexpr const char* kVertexSrc =
     "uniform vec3 uVel;\n"
     "uniform vec3 uGrav;\n"
     "uniform vec3 uWind;\n"       // 0.12-Y-F2: o vento global (o WindTIC)
+    "uniform float uSpawnScale;\n"  // 0.12-Z2 F3: o volume do clima (o raio)
+    "uniform float uMinWorldPerDepth;\n"  // 0.12-Z2 F3: o piso em píxeis
     "uniform float uTime;\n"
     "uniform float uLifetime;\n"
     "uniform float uStartSize;\n"
@@ -148,12 +277,14 @@ inline constexpr const char* kVertexSrc =
     "void main() {\n"
     "    float seed = aOriginSeed.w;\n"
     "    float localTime = mod(uTime + (seed * 100.0), uLifetime);\n"
-    "    vec3 p = uPos + aOriginSeed.xyz\n"
+    "    vec3 p = uPos + (aOriginSeed.xyz * uSpawnScale)\n"
     "              + (uVel * localTime)\n"
     "              + (0.5 * uGrav * localTime * localTime)\n"
     "              + (uWind * localTime);\n"
     "    float lifeProgress = localTime / uLifetime;\n"
     "    float sz = uStartSize + (uEndSize - uStartSize) * lifeProgress;\n"
+    "    vec4 center = uVP * vec4(p, 1.0);\n"
+    "    if (center.w > 0.0) sz = max(sz, uMinWorldPerDepth * center.w);\n"
     "    vec3 quad = p + uRight * (aCorner.x * sz)\n"
     "                   + uUp * (aCorner.y * sz);\n"
     "    gl_Position = uVP * vec4(quad, 1.0);\n"

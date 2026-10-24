@@ -9569,3 +9569,127 @@ TEST(regress_glctx_z2_audit) {
                    "(o location sobrevive à recriação)");
     }
 }
+
+// R-073 — regress_weather_z2_f3 (0.12-Z2 FASE 3): O CLIMA VISÍVEL — os
+// achados do F0.4 fechados na FONTE: (1) o PISO EM PÍXEIS no VS (o max()
+// com o w do centro — a gota de 0.015 m media ~1.3 px @720p/dist 7,
+// invisível no device); (2) o EMISSOR SEGUE A CÂMARA (o ramo do clima no
+// passe de partículas — followOrigin + uSpawnScale); (3) O ORÇAMENTO DO
+// FPS (a EMA degrada o count do clima abaixo de 50 fps); (4) o VOLUME
+// transportado pelo preset e pelo .goni ("rad"). A mutação (o max() do VS
+// removido) fica VERMELHA aqui.
+TEST(regress_weather_z2_f3) {
+    {
+        std::string src;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/render/ParticleShader.h", src));
+        const std::string code = test::stripCppComments(src);
+        // (1) o piso em píxeis no VS (a FONTE ÚNICA das puras + o GLSL)
+        EXPECT_MSG(code.find("kMinParticlePx = 3.0f") !=
+                       std::string::npos,
+                   "R-073: o piso em píxeis (kMinParticlePx 3.0) saiu da "
+                   "fonte única");
+        EXPECT_MSG(code.find("uniform float uMinWorldPerDepth;") !=
+                       std::string::npos &&
+                       code.find("max(sz, uMinWorldPerDepth * center.w)") !=
+                           std::string::npos,
+                   "R-073: o max() do piso no VS saiu (a gota sub-pixel "
+                   "volta — o clima invisível no device)");
+        // (2) o volume do clima (a escala do spawn no VS)
+        EXPECT_MSG(code.find("uniform float uSpawnScale;") !=
+                       std::string::npos &&
+                       code.find("(aOriginSeed.xyz * uSpawnScale)") !=
+                           std::string::npos,
+                   "R-073: a escala do volume saiu do VS (o clima volta ao "
+                   "ponto)");
+        // (3) o orçamento do FPS (os números do dono)
+        EXPECT_MSG(code.find("kFpsFloor   = 50.0f") != std::string::npos &&
+                       code.find("kFpsRecover = 58.0f") !=
+                           std::string::npos &&
+                       code.find("kScaleMin   = 0.25f") !=
+                           std::string::npos,
+                   "R-073: o orçamento do FPS (50/58/0.25) saiu da fonte "
+                   "única");
+    }
+    {
+        std::string m;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/platform/main.cpp", m));
+        const std::string mc = test::stripCppComments(m);
+        EXPECT_MSG(mc.find("g_weatherBudget.step(clockFrozen ? 0.0f : "
+                           "g_frameDt);") != std::string::npos,
+                   "R-073: o orçamento deixou de correr por frame (a EMA "
+                   "morre)");
+        EXPECT_MSG(mc.find("fx::followOrigin(aim, pes.at(i).spawnRadius, "
+                           "origem);") != std::string::npos,
+                   "R-073: o emissor do clima deixou de seguir a câmara");
+        EXPECT_MSG(mc.find("pp.maxParticles = "
+                           "g_weatherBudget.count(pp.maxParticles);") !=
+                       std::string::npos,
+                   "R-073: o orçamento deixou de escalonar o count do "
+                   "clima");
+        EXPECT_MSG(mc.find("pp.minWorldPerDepth = partMinW;") !=
+                       std::string::npos,
+                   "R-073: o piso em píxeis deixou de chegar ao draw");
+    }
+    {
+        std::string ae;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/components/AmbientEnvironment.h",
+            ae));
+        const std::string aec = test::stripCppComments(ae);
+        EXPECT_MSG(aec.find("pe->spawnRadius  = kRainRadius;") !=
+                       std::string::npos &&
+                       aec.find("pe->spawnRadius  = kSnowRadius;") !=
+                           std::string::npos,
+                   "R-073: os presets deixaram de transportar o volume do "
+                   "clima");
+        EXPECT_MSG(aec.find("pe->spawnRadius = "
+                            "ParticleEmitter::kSpawnRadiusDefault;") !=
+                       std::string::npos,
+                   "R-073: o NONE deixou de repor o jorro (o emissor fica "
+                   "com o volume do clima morto)");
+    }
+    {
+        std::string ss;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/core/SceneSerializer.cpp", ss));
+        const std::string ssc = test::stripCppComments(ss);
+        EXPECT_MSG(ssc.find("c.addMember(\"rad\", "
+                            "Json::makeNumber(pe->spawnRadius));") !=
+                       std::string::npos,
+                   "R-073: o .goni deixou de transportar o raio do volume "
+                   "(rad)");
+    }
+    // (5) O ACHADO P0 DA FASE 3 — O uLIFETIME NO UPLOAD: o uniform ficava
+    // 0.0 (o draw nunca o carregava) → mod(x,0)=NaN → TODOS os vértices
+    // morriam no clip — o sistema de partículas NÃO DESENHAVA NENHUM
+    // PÍXEL no driver real desde a 0.12-Y-F1 (o stub do CI conta draws e
+    // não vê fragmentos; a prova de píxeis da FASE 3 é que apanhou). A
+    // mutação (remover o upload) fica VERMELHA aqui.
+    {
+        std::string pr;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/render/ParticleRenderer.cpp", pr));
+        const std::string prc = test::stripCppComments(pr);
+        EXPECT_MSG(prc.find("locLifetime_ = "
+                            "glGetUniformLocation(prog_, \"uLifetime\");") !=
+                       std::string::npos,
+                   "R-073: o location do uLifetime saiu do init (o uniform "
+                   "volta a ficar 0.0 — NaN no mod — zero píxeis)");
+        EXPECT_MSG(prc.find("glUniform1f(locLifetime_, p.lifetime);") !=
+                       std::string::npos,
+                   "R-073: o UPLOAD do uLifetime saiu do draw (mod(x,0)="
+                   "NaN — o clima volta a desaparecer no device)");
+        // o upload tem de ser ANTES do uTime (o ÚLTIMO 1f — o contrato)
+        {
+            const size_t life = prc.find("glUniform1f(locLifetime_, "
+                                         "p.lifetime);");
+            const size_t time = prc.find("glUniform1f(locTime_, p.time);");
+            EXPECT_MSG(life != std::string::npos && time != std::string::npos &&
+                           life < time,
+                       "R-073: o uLifetime passou o uTime (o ÚLTIMO 1f do "
+                       "draw é o contrato da casa)");
+        }
+    }
+}

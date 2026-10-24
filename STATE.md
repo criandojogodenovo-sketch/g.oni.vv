@@ -1,7 +1,7 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-24 · vc: 133 · Último commit: este (a 0.12-Z2 F2 —
-o tom de chão + o varrimento + o ⌖; o RELATORIO-0.12-Z2-RASTER.md §F2);
+Atualizado: 2026-10-25 · vc: 134 · Último commit: este (a 0.12-Z2 F3 —
+o clima visível + o P0 do uLifetime; o RELATORIO-0.12-Z2-RASTER.md §F3);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -9,52 +9,34 @@ o tom de chão + o varrimento + o ⌖; o RELATORIO-0.12-Z2-RASTER.md §F2);
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-Z2 (CONTEXTO GL + WE + CLIMA + AUDITORIA TOTAL) —
-  F1-BIS FECHADA (vc 133)**. A AUDITORIA ADICIONAL do ciclo de vida (os
-  achados DISJUNTOS dos das F1/F2): o eglInitialize(nullptr) matava o
-  boot no glvnd (PROVADO por probe — major/minor locais); o retorno do
-  eglSwapBuffers verificado (o lastSwapOk_ alimenta a sonda); o init
-  parcial com auto-limpeza; o TERM resetA o ESTADO DE INTERAÇÃO (o
-  Android destrói a janela a meio do gesto); o font-mono OPCIONAL no
-  gestor (o recreateAll já não aborta na camada 2); o Renderer::init
-  começa pelo destroy + os loc* repostos; os prims mortos na
-  recuperação; o default do NaN em dayCycleSpeed é o do campo; a fuga de
-  ~2,9 GB/run dos testes texbind morta (o RAII TmpDirGuard). O 2.º
-  desvio do shim (RASTER_SURFACELESS=1 — o eglGetDisplay → a plataforma
-  surfaceless do Mesa + o bit WINDOW→PBUFFER): a prova inteira corre
-  SEM X11. R-072 (+ o pin z2_audit_term_reseta_input, a mutação
-  VERMELHA ao vivo). raster_z2 27/0 · raster_z2 --fuzz 150/0 · test_core
-  0 falhas · c33 1113/0 · a corrida latente do streaming_paralelo é
-  PRÉ-EXISTENTE (prova no §A.2.5 do RELATORIO-0.12-Z2-AUDIT.md).
+- **Campanha 0.12-Z2 (CONTEXTO GL + WE + CLIMA + AUDITORIA TOTAL) — F3
+  FECHADA (vc 134)**. O CLIMA VISÍVEL: **O ACHADO P0** — o uniform
+  uLifetime NUNCA era carregado pelo draw das partículas (ficava 0.0 →
+  mod(x,0)=NaN → TODOS os vértices morriam no clip — o sistema NÃO
+  desenhava NENHUM píxel no driver real desde a 0.12-Y-F1; o stub do CI
+  conta draws, a prova de píxeis da FASE 3 apanhou) — a cura: o upload
+  ANTES do uTime (R-073, a mutação vermelha ao vivo). O piso em píxeis
+  (kMinParticlePx 3.0, o max() com o w do centro no VS), o emissor a
+  seguir ao OLHAR (followOrigin + uSpawnScale, raios 6/5 pela densidade,
+  o NONE repõe o jorro), o orçamento do FPS (a EMA 50/58 piso 0.25 — SÓ
+  o clima), o spawnRadius no .goni/Inspector (PeSpawn 5448, o rowCount
+  8→9), **o ACHADO F3**: a pausa não congelava os relógios do render
+  (clockFrozen — o contrato Y-E). As provas POR PÍXEL (--clima V1..V10,
+  0 falhas): chuva 1431/neve 1627/trovoada 1986 px, o follow 6984 px a
+  2000 do mundo, o piso 1805 px a 200 m, o contexto EXATO (V9), a pausa
+  (V6) — + o VLM (trovoada/neve visíveis). raster_z2 27/0 · --clima
+  0/0 · --fuzz 150/0 · test_core 0 falhas · c33 1113/0.
 
-- **Campanha 0.12-Z2 (CONTEXTO GL + WE + CLIMA + AUDITORIA TOTAL) — F0
-  (vc 130) e F1 (vc 131) FECHADAS**. **F1**: o --fuzz no raster_z2 —
-  1050 ciclos de perda REAL (7 seeds ×150) com cenários (WE on/off,
-  storm, gesto) — o frame seguinte EXATO (hash FNV) em TODOS + o input
-  vivo (28 checks: o pick do cubo re-seleciona). O ACHADO **R-070** (o
-  fix de produto): o invalidateAll saltava a camada cujo recreate falhou
-  (`if (!l.valid) continue`) → o handle morto sobrevivia (o guard tex_ do
-  FontAtlas "recriava" com id morto = o TEXTO MORTO após sair e voltar;
-  a mono no OEM enxuto falha SEMPRE) — o invalidate corre SEMPRE
-  (idempotente). pin do term duplo (inv0+6) + sentinela
-  regress_glctx_z2_fase1 + REGRESSOES.md. test_core 0 · c33 1113/0.
-  **F2 (vc 132)**: o below-horizon do céu tinha o clamp que pintava o
-  meio-plano inferior com uHorizon (a «zona azul/escura fixa») — o TOM DE
-  CHÃO (horizonte×0.45, transição 0.18) na pura + no FS (R-071); o
-  VARRIMENTO --sky2 200×2 (a grelha inteira, 0.00% preto; a grelha IMUNE
-  à névoa — 0 px); a CÂMARA NUNCA PRESA (o ⌖ na barra + o duplo toque no
-  vazio, ambos PROVADOS por input real; a cameraEnsureSane mantém-se).
-  pin env_sky_type novo + R-071. **F0 (vc 130)**: o raster_z2 — a engine contra o DRIVER GLES REAL
-  (Mesa/llvmpipe 25.0.7, ES 3.2, EGL pbuffer; o shim é o ÚNICO desvio do
-  header canónico). A grelha/o céu/o cubo/o gizmo/a UI PROVADOS em
-  PIXELS (27 checks/0; fwidth corre). Os 4 sintomas com captura ANTES:
-  (a) a «zona azul/escura» LOCALIZADA — o FS do céu pinta o meio-plano
-  inferior com uHorizon (SkyRenderer.cpp `clamp(dir.y,0,1)`; a FASE 2 dá
-  o tom de chão); (d) a perda TERM/INIT REAL recupera no caminho FIEL ao
-  device (2 falsos positivos REFUTADOS como artefactos do hospedeiro).
-  Bisseção por passe aferrada (7 vivos). O flash do STORM acende e morre
-  (nunca persistente). ZERO linhas de produto; o raster_z2 NÃO entra no
-  ctest.
+- **Campanha 0.12-Z2 (CONTEXTO GL + WE + CLIMA + AUDITORIA TOTAL) —
+  F1-BIS (vc 133), F0/F1 (vc 130/131) e F2 (vc 132) FECHADAS** (a
+  história completa no RELATORIO-0.12-Z2-RASTER.md e no
+  RELATORIO-0.12-Z2-AUDIT.md): a F1-BIS fechou os 9 achados disjuntos
+  do ciclo de vida (R-072); a F1 fez o --fuzz 1050 ciclos de perda REAL
+  com o frame EXATO e o input vivo (R-070 — o invalidateAll saltava a
+  camada falhada); a F2 deu o tom de chão ao céu (a «zona azul fixa»
+  morta — R-071), o varrimento --sky2 200×2 e o «Repor câmara» (⌖ +
+  duplo toque); a F0 construiu o raster_z2 (a engine contra o DRIVER
+  GLES REAL — Mesa/llvmpipe, os píxeis LIDOS, a bisseção por passe).
 
 - **Campanha 0.12-Y-F2 (O CLIMA E O VENTO) — FECHADA no código
   (vc 124; a história no RELATORIO-0.12-Y-F2-WEATHER.md)** (a cláusula

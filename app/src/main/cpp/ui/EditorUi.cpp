@@ -2962,6 +2962,21 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 }
             }
             break;
+        case InspRow::Kind::PeSpawn:
+            // 0.12-Z2 F3 — slider RAIO DO VOLUME DE SPAWN 0.15..60 (o
+            // clima vive num volume à volta da câmara; o jorro de
+            // fábrica é 0.15 — o clampFields da casa aferra)
+            if (peEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "raio spawn",
+                              ParticleEmitter::kSpawnRadiusMin,
+                              ParticleEmitter::kSpawnRadiusMax,
+                              peEdit->spawnRadius, "%.1f")) {
+                    peEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
         case InspRow::Kind::PeTex:
             // 0.12-Y-F1 — o botão TEXTURA (o NAVEGADOR pela intenção —
             // o MESMO contrato UI→main do hdri; "" = o sprite procedural)

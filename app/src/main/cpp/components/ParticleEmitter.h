@@ -20,6 +20,10 @@
 //   gravity      — a aceleração (unidades/s²)
 //   texturePath  — a imagem da partícula ("" = o sprite procedural —
 //                  o disco suave do FS; fogo/fumaça MVP sem asset)
+//   spawnRadius  — o RAIO do volume de spawn (0.12-Z2 F3: o clima vive
+//                  num volume do MUNDO, não num ponto; o default 0.15 é
+//                  o jorro da F1 byte a byte; os presets do clima põem
+//                  14/12 — o volume à volta da câmara)
 //
 // A matemática da vida (o contrato do VS, replicado nas puras):
 //   localTime    = mod(uTime + seed*100, lifetime)   — a semente DESFAZ o
@@ -50,6 +54,12 @@ public:
     static constexpr f32 kGravMax             = 20.0f;
     static constexpr f32 kVelYDefault         = 3.0f;    // a fonte (jorro)
     static constexpr f32 kGravYDefault        = -4.0f;   // cai — a fonte
+    // 0.12-Z2 F3 — o volume de spawn (o default É o jorro da F1: o
+    // kSpawnRadius do ParticleShader.h replica este valor; o
+    // static_assert no ParticleRenderer aferra o par)
+    static constexpr f32 kSpawnRadiusDefault  = 0.15f;
+    static constexpr f32 kSpawnRadiusMin      = 0.15f;
+    static constexpr f32 kSpawnRadiusMax      = 60.0f;
 
     i32 maxParticles = kMaxParticlesDefault;
     f32 lifetime     = kLifetimeDefault;
@@ -60,6 +70,8 @@ public:
     f32 endSize   = kSizeEndDefault;
     f32 velocity[3] = {0.0f, kVelYDefault, 0.0f};
     f32 gravity[3]  = {0.0f, kGravYDefault, 0.0f};
+    f32 spawnRadius = kSpawnRadiusDefault;   // 0.12-Z2 F3 (o volume; o
+                                             // serializer só escreve ≠ default)
     std::string texturePath;   // "" = o sprite procedural do FS
 
     bool active = true;       // o invariante da casa (o TIC ativo manda —
@@ -85,6 +97,8 @@ public:
             if (gravity[i] < -kGravMax) gravity[i] = -kGravMax;
             if (gravity[i] > kGravMax) gravity[i] = kGravMax;
         }
+        if (spawnRadius < kSpawnRadiusMin) spawnRadius = kSpawnRadiusMin;
+        if (spawnRadius > kSpawnRadiusMax) spawnRadius = kSpawnRadiusMax;
         for (int i = 0; i < 4; ++i) {
             if (startColor[i] < 0.0f) startColor[i] = 0.0f;
             if (startColor[i] > 1.0f) startColor[i] = 1.0f;

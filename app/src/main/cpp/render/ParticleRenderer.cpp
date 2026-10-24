@@ -25,6 +25,9 @@ constexpr u32 kSeedCapacity = static_cast<u32>(
     ParticleEmitter::kMaxParticlesMax);
 static_assert(ParticleEmitter::kMaxParticlesMax == 2000,
               "o teto do buffer de seeds casa com o teto do componente");
+static_assert(fx::kSpawnRadius == ParticleEmitter::kSpawnRadiusDefault,
+              "o raio do buffer de seeds casa com o default do componente "
+              "(0.12-Z2 F3 — a escala do volume parte do mesmo 0.15)");
 
 constexpr f32 kQuadCorners[8] = {
     -1.0f, -1.0f,   1.0f, -1.0f,   -1.0f, 1.0f,   1.0f, 1.0f,
@@ -79,6 +82,9 @@ bool ParticleRenderer::init() {
     locVel_ = glGetUniformLocation(prog_, "uVel");
     locGrav_ = glGetUniformLocation(prog_, "uGrav");
     locWind_ = glGetUniformLocation(prog_, "uWind");   // 0.12-Y-F2
+    locSpawnScale_ = glGetUniformLocation(prog_, "uSpawnScale");   // F3-Z2
+    locMinW_ = glGetUniformLocation(prog_, "uMinWorldPerDepth");   // F3-Z2
+    locLifetime_ = glGetUniformLocation(prog_, "uLifetime");   // F3-Z2 P0
     locStartSize_ = glGetUniformLocation(prog_, "uStartSize");
     locEndSize_ = glGetUniformLocation(prog_, "uEndSize");
     locStartCol_ = glGetUniformLocation(prog_, "uStartCol");
@@ -128,6 +134,9 @@ void ParticleRenderer::destroy() {
     if (prog_) { glDeleteProgram(prog_); prog_ = 0; }
     locVP_ = locRight_ = locUp_ = locPos_ = locVel_ = locGrav_ = -1;
     locWind_ = -1;   // 0.12-Y-F2
+    locSpawnScale_ = -1;   // 0.12-Z2 F3
+    locMinW_ = -1;         // 0.12-Z2 F3
+    locLifetime_ = -1;     // 0.12-Z2 F3 P0
     locStartSize_ = locEndSize_ = locStartCol_ = locEndCol_ = -1;
     locHasTex_ = locTex_ = -1;
     locTime_ = -1;
@@ -220,6 +229,22 @@ DrawStats ParticleRenderer::draw(const Params& p) const {
     // zero = o caminho de sempre da F1 byte a byte)
     if (locWind_ >= 0) {
         glUniform3f(locWind_, p.wind[0], p.wind[1], p.wind[2]);
+    }
+    // 0.12-Z2 F3 — o volume do clima + o piso em píxeis (1f, ANTES do
+    // uTime: o contrato da casa — o uTime continua o ÚLTIMO 1f do draw)
+    if (locSpawnScale_ >= 0) {
+        glUniform1f(locSpawnScale_, p.spawnScale);
+    }
+    if (locMinW_ >= 0) {
+        glUniform1f(locMinW_, p.minWorldPerDepth);
+    }
+    // 0.12-Z2 F3 — O ACHADO P0: o uLifetime faltava no upload (o uniform
+    // ficava 0.0 → mod(x,0)=NaN → zero fragmentos no driver real — o
+    // sistema NUNCA desenhou píxel nenhum; o stub do CI conta draws e
+    // não via isto). O upload entra ANTES do uTime (o contrato: o uTime
+    // continua o ÚLTIMO 1f do draw).
+    if (locLifetime_ >= 0) {
+        glUniform1f(locLifetime_, p.lifetime);
     }
     if (locStartSize_ >= 0) {
         glUniform1f(locStartSize_, p.startSize);

@@ -137,6 +137,13 @@ ParticleRenderer g_particles;
 
 f32              g_fxTime = 0.0f;
 
+// 0.12-Z2 F3: O ORÇAMENTO DO CLIMA — a EMA do frame real degrada o COUNT
+// dos emissores de CLIMA (com AmbientEnvironment ativo) abaixo de 50 fps
+// e recupera acima de 58 (o histerético). Os emissores do UTILIZADOR
+// nunca são tocados. O mecanismo é pin-aferrado com dt sintético; os
+// números do Mali GE8320 entram na VERIFICAÇÃO NO DISPOSITIVO.
+fx::WeatherBudget g_weatherBudget;
+
 // ---- F3: editor ------------------------------------------------------------
 editor::EditorState g_editor;        // seleção + overlays
 TickGroups          g_systems;       // runner (não-dono)
@@ -6063,7 +6070,7 @@ i32 onInputEvent(android_app* /*app*/, AInputEvent* event) {
 // O CÉU PROCEDURAL desenha PRIMEIRO no bloco do Environment (o clear de
 // sempre fica byte a byte — o quad pinta POR CIMA dele com skyType 1).
 DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
-                   const Mat4& proj) {
+                   const Mat4& proj, f32 partMinW) {
     DrawStats st{};
     g_blockFrame = BlockFrameStats{};   // as métricas DO frame (HUD/log)
     g_skinFrame = SkinFrameStats{};
@@ -6632,28 +6639,61 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
             if (!pt || !pt->active || !pes.at(i).active) {
                 continue;   // o MESMO invariante dos outros componentes
             }
+            // 0.12-Z2 F3: O CLIMA SEGUE A CÂMARA — o TIC com
+            // AmbientEnvironment ATIVO e weatherType != NONE vive À VOLTA
+            // do observador (fx::followOrigin — o volume do mundo); o
+            // jorro do UTILIZADOR fica na origem do TIC (byte a byte). O
+            // orçamento do FPS toca SÓ o clima.
+            const AmbientEnvironment* ae =
+                pt->getComponent<AmbientEnvironment>();
+            const bool isWeather =
+                ae && ae->active &&
+                ae->weatherType != AmbientEnvironment::kWeatherNone;
             const Transform3D* tr = pt->getComponent<Transform3D>();
-            if (!tr) {
+            if (!tr && !isWeather) {
                 continue;   // sem Transform não há origem (o preset SEMPRE
                             // traz um — o .goni à mão pode não ter)
             }
             ParticleRenderer::Params pp;
             pp.vp = vp.m;
-            {
-                // a base da câmara pela FONTE ÚNICA (o Vec3 da casa; o
-                // Params usa f32[3] — a cópia é a ponte honesta)
-                Vec3 rightV, upV, fwdV;
-                sky::viewBasis(view, rightV, upV, fwdV);
-                pp.right[0] = rightV.x;
-                pp.right[1] = rightV.y;
-                pp.right[2] = rightV.z;
-                pp.up[0] = upV.x;
-                pp.up[1] = upV.y;
-                pp.up[2] = upV.z;
+            // a base da câmara pela FONTE ÚNICA (o Vec3 da casa; o
+            // Params usa f32[3] — a cópia é a ponte honesta; o fwd serve
+            // ao ALVO do clima em Play)
+            Vec3 rightV, upV, fwdV;
+            sky::viewBasis(view, rightV, upV, fwdV);
+            pp.right[0] = rightV.x;
+            pp.right[1] = rightV.y;
+            pp.right[2] = rightV.z;
+            pp.up[0] = upV.x;
+            pp.up[1] = upV.y;
+            pp.up[2] = upV.z;
+            if (isWeather) {
+                // 0.12-Z2 F3: o ALVO do clima — À VOLTA do que a câmara
+                // OLHA: no editor a orbit mira o target (eye + fwd·dist =
+                // o target exato pela MESMA base), em Play a câmara de
+                // cena olha à frente (eye + fwd·meio volume). A 1.ª run do
+                // --clima PROVOU que seguir o OLHO põe o volume fora do
+                // frustum descendente (0 px de chuva).
+                const f32 aimDist = g_editor.playMode
+                                        ? pes.at(i).spawnRadius * 0.5f
+                                        : g_camera.dist;
+                const f32 aim[3] = {camEye.x + fwdV.x * aimDist,
+                                    camEye.y + fwdV.y * aimDist,
+                                    camEye.z + fwdV.z * aimDist};
+                f32 origem[3];
+                fx::followOrigin(aim, pes.at(i).spawnRadius, origem);
+                pp.pos[0] = origem[0];
+                pp.pos[1] = origem[1];
+                pp.pos[2] = origem[2];
+                // o volume: o buffer nasce unitário ×kSpawnRadius — o
+                // raio do clima escala o offset no VS (uSpawnScale)
+                pp.spawnScale = fx::spawnScale(pes.at(i).spawnRadius,
+                                               fx::kSpawnRadius);
+            } else {
+                pp.pos[0] = tr->world.m[12];   // a coluna da TRANSLAÇÃO (a
+                pp.pos[1] = tr->world.m[13];   // mesma leitura do impostor)
+                pp.pos[2] = tr->world.m[14];
             }
-            pp.pos[0] = tr->world.m[12];   // a coluna da TRANSLAÇÃO (a
-            pp.pos[1] = tr->world.m[13];   // mesma leitura do impostor)
-            pp.pos[2] = tr->world.m[14];
             pp.time = g_fxTime;
             pp.wind[0] = windNow[0];   // 0.12-Y-F2: o vento GLOBAL (o
             pp.wind[1] = windNow[1];   // 1.º WindTIC ativo; (0,0,0) sem
@@ -6668,11 +6708,21 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
             pp.grav[2] = pe.gravity[2];
             pp.startSize = pe.startSize;
             pp.endSize = pe.endSize;
+            // 0.12-Z2 F3: O PISO EM PÍXEIS — o tamanho-mundo de
+            // kMinParticlePx píxeis à profundidade do centro (a pura
+            // fx::minWorldPerDepth; 0.0 = o piso morto de sempre)
+            pp.minWorldPerDepth = partMinW;
             for (int c = 0; c < 4; ++c) {
                 pp.startCol[c] = pe.startColor[c];
                 pp.endCol[c] = pe.endColor[c];
             }
             pp.maxParticles = pe.maxParticles;
+            // o ORÇAMENTO do FPS: o count do CLIMA degrada/recupera (a
+            // EMA do frame real; o piso 0.25 — nunca zero; o utilizador
+            // fora)
+            if (isWeather) {
+                pp.maxParticles = g_weatherBudget.count(pp.maxParticles);
+            }
             // a textura LAZY (o cache pelo path vive no renderer; o path
             // vazio = o sprite procedural — uHasTex 0)
             if (!pe.texturePath.empty() && g_storage) {
@@ -7468,24 +7518,32 @@ void frame() {
             }
         }
     }
-    // 0.12-Y (3.Y-D): o relógio das NUVENS avança com o frame REAL (a pausa
-    // congela o céu — a mesma honra do sdf::g_time; 1× por frame, nunca por
-    // passo fixo — o céu é render, não lógica)
-    g_skyTime += g_frameDt;
+    // 0.12-Y (3.Y-D): o relógio das NUVENS avança com o frame REAL (1× por
+    // frame, nunca por passo fixo — o céu é render, não lógica).
+    // 0.12-Z2 F3 (o ACHADO): o CONTRATO documentado («a pausa congela o céu
+    // — RELATORIO-0.12-Y-E-SKY.md §Y-E») NÃO se cumpria: o `frozen` do loop
+    // só parava os passos fixos e os RELÓGIOS do render avançavam em
+    // Play+pausa (o clima/nuvens/dia continuavam — o dono vê o tempo
+    // fugir). A cura: os relógios de RENDER honram o MESMO frozen dos
+    // sistemas (o editor e o Play a correr avançam como sempre).
+    const bool clockFrozen = g_editor.playMode && g_editor.paused;
+    g_skyTime += clockFrozen ? 0.0f : g_frameDt;
     // 0.12-Y-F1: o relógio das PARTÍCULAS (o MESMO contrato do céu: o
     // frame real avança, a pausa congela — render, não lógica)
-    g_fxTime += g_frameDt;
+    g_fxTime += clockFrozen ? 0.0f : g_frameDt;
     // 0.12-Y-E: o AUTO CICLE — o relógio do DIA avança pelo dayCycleSpeed
     // (1.0 = 1 hora de jogo por segundo real; o 1.º Environment ATIVO manda,
     // o MESMO invariante do clear) — dá a volta em 24h (o clampFields
-    // modula; o render de baixo consome o valor fresco do MESMO frame)
+    // modula; o render de baixo consome o valor fresco do MESMO frame;
+    // a pausa congela o dia — o MESMO frozen dos relógios de render)
     {
         auto& envsMut = g_scene.components().environments();
         for (u32 i = 0; i < envsMut.size(); ++i) {
             const Tic* t = g_scene.get(envsMut.owner(i));
             if (t && t->active && envsMut.at(i).active) {
                 Environment* em = &envsMut.at(i);
-                if (em->autoCycle && em->dayCycleSpeed > 0.0f) {
+                if (em->autoCycle && em->dayCycleSpeed > 0.0f &&
+                    !clockFrozen) {
                     em->timeOfDay += em->dayCycleSpeed * g_frameDt;
                     em->clampFields();
                 }
@@ -7493,13 +7551,17 @@ void frame() {
             }
         }
     }
+    // 0.12-Z2 F3: o passo do ORÇAMENTO do clima (a EMA do frame real;
+    // o dt congelado/pausado não mexe — o count mantém o último)
+    g_weatherBudget.step(clockFrozen ? 0.0f : g_frameDt);
     // 0.12-Y-F2: a TROVOADA — o update do STORM (o pseudocódigo EXATO do
     // dono: o timer desce, o raio arma o flash 1.0 e re-agenda
     // random(3,8)s, o flash morre a 3.0/s — vive ~0.33s). O 1.º
     // AmbientEnvironment ATIVO manda (o MESMO invariante do clear/ciclo);
     // o random vem do hash INTEIRO da casa sobre o relógio fx
     // (determinístico — o CI e o device vêem a MESMA sequência, zero
-    // rand()).
+    // rand()); a pausa congela o raio (o MESMO frozen — o dt 0 não mexe
+    // no timer nem no flash).
     {
         auto& aesMut = g_scene.components().ambients();
         for (u32 i = 0; i < aesMut.size(); ++i) {
@@ -7508,13 +7570,37 @@ void frame() {
                 const u32 h = fx::hashFx(
                     static_cast<u32>(g_fxTime * 1000.0f));
                 aesMut.at(i).updateStorm(
-                    g_frameDt,
+                    clockFrozen ? 0.0f : g_frameDt,
                     static_cast<f32>(h & 0xFFFFu) / 65535.0f);
                 break;
             }
         }
     }
-    const DrawStats st3d = drawTics(vp, camEye, view, proj);
+    // 0.12-Z2 F3: O PISO EM PÍXEIS das partículas — o tamanho-mundo de
+    // fx::kMinParticlePx (3 px) à profundidade 1, pela câmara do frame e
+    // pela ALTURA EM PÍXEIS do viewport GL REAL (o rect no editor — o
+    // scissor é que corta; o ecrã inteiro no Play). A orto (o w do clip
+    // fica 1) usa minWorldOrtho com a meia-altura do CameraComp.
+    f32 partMinW = 0.0f;
+    {
+        const f32 viewHPx = (viewRect.h > 1.0f) ? viewRect.h : f32(h);
+        f32 tanHalf = 0.0f;
+        if (gameCamTr && gameCamComp) {
+            if (gameCamComp->projection == CameraComp::Projection::Orthographic) {
+                partMinW = fx::minWorldOrtho(fx::kMinParticlePx,
+                                             gameCamComp->orthoSize, viewHPx);
+            } else {
+                tanHalf = fx::tanHalfFovDeg(gameCamComp->fovY);
+            }
+        } else {
+            tanHalf = std::tan(g_camera.fovY * 0.5f);
+        }
+        if (tanHalf > 0.0f) {
+            partMinW = fx::minWorldPerDepth(fx::kMinParticlePx, tanHalf,
+                                            viewHPx);
+        }
+    }
+    const DrawStats st3d = drawTics(vp, camEye, view, proj, partMinW);
     // 0.10-M (PASSO 4) — o LOG das métricas reais (AQUI: editor E play — o
     // statusLine de baixo só vive em play; throttled 1×/s e só quando o nº
     // de desenhados MUDA — o orbit do dono produz a linha quando o culling

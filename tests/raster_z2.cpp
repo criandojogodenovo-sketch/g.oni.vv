@@ -347,6 +347,42 @@ Handle addStormTic() {
     return h;
 }
 
+// 0.12-Z2 F3 — o TIC do clima POR TIPO (o mesmo corpo do storm, o tipo
+// vem de fora; o raio da trovoada fica longe — o flash não entra nas
+// provas de hash)
+Handle addWeatherTic(u8 type) {
+    const Handle h = g_scene.create("Clima");
+    Tic* t = g_scene.get(h);
+    t->addComponent<Transform3D>();
+    AmbientEnvironment* ae = t->addComponent<AmbientEnvironment>();
+    ParticleEmitter* pe = t->addComponent<ParticleEmitter>();
+    ae->weatherType = type;
+    ae->thunderTimer = 60.0f;
+    ae->applyWeatherPreset(pe);
+    return h;
+}
+
+// os píxeis "de partícula": na região central, os píxeis que DIFEREM do
+// frame de referência (sem clima) por mais de 8/255 em qualquer canal —
+// o sinal das gotas/flocos sobre a cena
+long particlePixels(const std::vector<u8>& frame, const std::vector<u8>& ref,
+                    int w, int h, int x0, int y0, int x1, int y1) {
+    long n = 0;
+    const size_t np = frame.size() < ref.size() ? frame.size() : ref.size();
+    (void)np;
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            const size_t o = (static_cast<size_t>(y) * w + x) * 4;
+            if (o + 3 >= frame.size() || o + 3 >= ref.size()) continue;
+            const int dr = std::abs(int(frame[o]) - int(ref[o]));
+            const int dg = std::abs(int(frame[o + 1]) - int(ref[o + 1]));
+            const int db = std::abs(int(frame[o + 2]) - int(ref[o + 2]));
+            if (dr > 8 || dg > 8 || db > 8) ++n;
+        }
+    }
+    return n;
+}
+
 // ===========================================================================
 // FASE 2-Z2 — O VARRIMENTO DE CÂMARA (o pedido: ≥200 poses e direções,
 // incluindo as bordas do mundo, por cima e por baixo da grelha, e dentro
@@ -814,11 +850,450 @@ int fuzzRun(int cycles, u32 seed) {
     return failures;
 }
 
+// ===========================================================================
+// FASE 3-Z2 — O CLIMA VISÍVEL (o pedido: cada tipo de clima com prova de
+// render REAL — visibilidade, movimento, ciclo de vida, vento+gravidade,
+// NONE silencia, pausa/retoma, o emissor segue a câmara, o piso em píxeis
+// e a recuperação de contexto sem costura + o orçamento do FPS). Relatório:
+// nº de provas por tipo + capturas C3_*.
+// ===========================================================================
+int climaRun() {
+    std::printf("\n== FASE 3 — O CLIMA VISÍVEL (provas por render real) ==\n");
+    int failures = 0;
+    int w = 0, h = 0;
+
+    // a pose de prova (a de sempre do dono) e o WE procedural
+    auto posePadrao = []() {
+        g_camera.target = Vec3{0.0f, 0.0f, 0.0f};
+        g_camera.yaw = 0.60f;
+        g_camera.pitch = 0.50f;
+        g_camera.dist = 6.0f;
+    };
+    const Handle weH = addWeTic();
+    selectCuboByName();
+    posePadrao();
+    frameN(3);
+
+    // ---- o frame SEM clima (a referência de visibilidade; o dt 0 fixa o
+    // relógio — a única variável entre frames é o clima) ------------------
+    g_weatherBudget.scale = 1.0f;   // o orçamento cheio (a prova do
+                                    // mecanismo é a V8, isolada)
+    stepFrame(0.0f);
+    stepFrame(0.0f);
+    const std::vector<u8> semClima = readFrame(&w, &h);
+    const f32 fxSemClima = g_fxTime;
+
+    // ---- V1: VISIBILIDADE por tipo (RAIN/SNOW/STORM) ---------------------
+    // o emissor do clima SEGUE a câmara (o volume raio 14/12 à volta do
+    // olho) — na pose padrão o sinal preenche a região central
+    const u8 tipos[3] = {AmbientEnvironment::kWeatherRain,
+                         AmbientEnvironment::kWeatherSnow,
+                         AmbientEnvironment::kWeatherStorm};
+    const char* nomes[3] = {"chuva", "neve", "trovoada"};
+    const char* caps[3] = {"C3_chuva", "C3_neve", "C3_trovoada"};
+    for (int t = 0; t < 3; ++t) {
+        const Handle wx = addWeatherTic(tipos[t]);
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        const std::vector<u8> fr = readFrame(&w, &h);
+        const long px = particlePixels(fr, semClima, w, h, 270, 180, 1010,
+                                       540);
+        std::printf("    V1 %s: %ld píxeis de partícula (centro)\n", nomes[t],
+                    px);
+        char msg[96];
+        std::snprintf(msg, sizeof(msg),
+                      "V1 %s VISÍVEL por píxeis (o F0.4 morre — o preset "
+                      "não é sub-pixel)", nomes[t]);
+        if (px <= 200) {
+            ++failures;
+            std::printf("    [FAIL] %s: o clima não se vê (%ld px)\n",
+                        nomes[t], px);
+            capturePng(caps[t]);
+        } else {
+            check(true, msg);
+            capturePng(caps[t]);
+            prova(nomes[t]);
+        }
+        g_scene.destroy(wx);
+        stepFrame(0.0f);
+    }
+
+    // ---- V2: MOVIMENTO (uTime vivo) + V3: O CICLO DE VIDA (o mod volta)
+    // o RAIN (vida 1.2 s): o mesmo fxTime → o mesmo frame; fxTime+0.5 →
+    // outro; fxTime+vida → IGUAL (a partícula renasce no mesmo sítio).
+    // O DOIS steps após cada pin: o 1.º frame CARREGA o uTime novo (o
+    // upload é o ÚLTIMO uniform do draw) e o 2.º DESENHA com ele (o
+    // contrato da casa)
+    {
+        const Handle wx = addWeatherTic(AmbientEnvironment::kWeatherRain);
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        g_fxTime = 10.0f;
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        const std::vector<u8> t0 = readFrame(&w, &h);
+        const u64 h0 = frameHash(t0);
+        g_fxTime = 10.5f;
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        const u64 h05 = frameHash(readFrame(&w, &h));
+        g_fxTime = 10.0f + 1.2f;   // EXATAMENTE um ciclo de vida depois
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        const std::vector<u8> tVida = readFrame(&w, &h);
+        const u64 hVida = frameHash(tVida);
+        g_fxTime = fxSemClima;
+        // o ciclo de vida com a TOLERÂNCIA da casa: o mod é f32 — as duas
+        // somas (10+100s vs 11.2+100s) arredondam diferente por partícula
+        // → ruído sub-píxel; o PADRÃO tem de ser o MESMO (<0.5% dos píxeis,
+        // delta ≤ 32 — o MESMO critério do fuzz da F1)
+        long dVida = 0;
+        int maxDVida = 0;
+        {
+            const size_t np = t0.size() < tVida.size() ? t0.size()
+                                                       : tVida.size();
+            for (size_t o = 0; o + 3 < np; o += 4) {
+                if (std::memcmp(&t0[o], &tVida[o], 4) != 0) {
+                    ++dVida;
+                    for (int k = 0; k < 4; ++k) {
+                        const int d =
+                            std::abs(int(t0[o + k]) - int(tVida[o + k]));
+                        if (d > maxDVida) maxDVida = d;
+                    }
+                }
+            }
+        }
+        const double pctVida = 100.0 * double(dVida) / double(w * h);
+        std::printf("    V2/V3 chuva: hash(t)=%016llx hash(t+0.5)=%016llx "
+                    "hash(t+vida)=%016llx | vida: %ld px (%.3f%%, maxΔ%d)\n",
+                    (unsigned long long)h0, (unsigned long long)h05,
+                    (unsigned long long)hVida, dVida, pctVida, maxDVida);
+        if (h0 == h05) {
+            ++failures;
+            std::printf("    [FAIL] V2: o uTime está MORTO (o clima "
+                        "congelado)\n");
+        } else {
+            check(true, "V2 MOVIMENTO: t vs t+0.5 muda o frame (uTime "
+                        "vivo — a chuva cai)");
+        }
+        if (pctVida >= 0.5 || maxDVida > 32) {
+            ++failures;
+            std::printf("    [FAIL] V3: o ciclo de vida não fecha (%.3f%% "
+                        "dos píxeis divergem — o mod da vida quebrou)\n",
+                        pctVida);
+        } else {
+            check(true, "V3 CICLO DE VIDA: t vs t+lifetime é o MESMO padrão "
+                        "(dentro do ruído f32 do mod — a partícula renasce)");
+        }
+        g_scene.destroy(wx);
+        stepFrame(0.0f);
+    }
+
+    // ---- V4: O VENTO GLOBAL (o WindTIC desvia a chuva) --------------------
+    {
+        const Handle wx = addWeatherTic(AmbientEnvironment::kWeatherRain);
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        g_fxTime = 20.0f;
+        stepFrame(0.0f);
+        const u64 semVento = frameHash(readFrame(&w, &h));
+        const Handle wnd = g_scene.create("Vento");
+        g_scene.get(wnd)->addComponent<Transform3D>();
+        WindTIC* wi = g_scene.get(wnd)->addComponent<WindTIC>();
+        wi->windStrength = 8.0f;   // a rajada forte (+x do default)
+        wi->clampFields();
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        g_fxTime = 20.0f;
+        stepFrame(0.0f);
+        const u64 comVento = frameHash(readFrame(&w, &h));
+        const long pxVento =
+            particlePixels(readFrame(&w, &h), semClima, w, h, 270, 180,
+                           1010, 540);
+        g_fxTime = fxSemClima;
+        std::printf("    V4 vento: hash sem=%016llx com=%016llx (%ld px "
+                    "de sinal)\n", (unsigned long long)semVento,
+                    (unsigned long long)comVento, pxVento);
+        if (semVento == comVento) {
+            ++failures;
+            std::printf("    [FAIL] V4: o vento NÃO desvia a chuva\n");
+        } else {
+            check(true, "V4 VENTO: o WindTIC (força 8) muda o frame da "
+                        "chuva (uWind·t no VS)");
+        }
+        g_scene.destroy(wnd);
+        g_scene.destroy(wx);
+        stepFrame(0.0f);
+    }
+
+    // ---- V5: NONE SILENCIA (o emissor volta ao jorro com count 0) --------
+    {
+        const Handle wx = addWeatherTic(AmbientEnvironment::kWeatherRain);
+        AmbientEnvironment* ae =
+            g_scene.get(wx)->getComponent<AmbientEnvironment>();
+        ParticleEmitter* pe =
+            g_scene.get(wx)->getComponent<ParticleEmitter>();
+        stepFrame(0.0f);
+        ae->weatherType = AmbientEnvironment::kWeatherNone;
+        ae->applyWeatherPreset(pe);
+        std::printf("    V5 NONE: maxParticles=%d raio=%.2f\n",
+                    pe->maxParticles, (double)pe->spawnRadius);
+        if (pe->maxParticles != 0 ||
+            std::fabs(pe->spawnRadius -
+                      ParticleEmitter::kSpawnRadiusDefault) > 1e-6f) {
+            ++failures;
+            std::printf("    [FAIL] V5: o NONE não silencia/repoem o "
+                        "jorro\n");
+        } else {
+            check(true, "V5 NONE: maxParticles 0 + o raio de volta ao "
+                        "jorro (o preset repõe)");
+        }
+        g_scene.destroy(wx);
+        stepFrame(0.0f);
+    }
+
+    // ---- V6: A PAUSA CONGELA (o ACHADO F3 — o contrato documentado) ------
+    {
+        const Handle wx = addWeatherTic(AmbientEnvironment::kWeatherRain);
+        // o PLAY (a barra de baixo nasce — o assentamento corre antes)
+        const bool playAntes = g_editor.playMode;
+        g_editor.playMode = true;
+        g_editor.paused = true;
+        for (int i = 0; i < 30; ++i) {
+            stepFrame(1.0f / 60.0f);
+        }
+        stepFrame(0.0f);
+        const std::vector<u8> pausaA = readFrame(&w, &h);
+        const f32 fxPausa = g_fxTime;
+        for (int i = 0; i < 20; ++i) {
+            stepFrame(1.0f / 60.0f);   // dt REAL — a pausa é que congela
+        }
+        const bool congelado = (std::fabs(g_fxTime - fxPausa) < 1e-6f);
+        stepFrame(0.0f);
+        const std::vector<u8> pausaB = readFrame(&w, &h);
+        const long dPausa = diffPixels(pausaA, pausaB);
+        // a RETOMA: o tempo volta a correr e o clima mexe (o DOIS steps:
+        // o 1.º carrega o tempo novo, o 2.º desenha com ele)
+        g_editor.paused = false;
+        g_fxTime += 0.5f;
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        const long dRetoma =
+            particlePixels(readFrame(&w, &h), pausaB, w, h, 270, 180, 1010,
+                           540);
+        std::printf("    V6 pausa: fxTime avançou=%d (%.4f → %.4f) | "
+                    "d(pausa)=%ld px | d(retoma)=%ld px\n",
+                    congelado ? 0 : 1, (double)fxPausa, (double)g_fxTime,
+                    dPausa, dRetoma);
+        if (!congelado) {
+            ++failures;
+            std::printf("    [FAIL] V6: o relógio fx avançou EM PAUSA (o "
+                        "ACHADO F3 regressou)\n");
+        } else {
+            check(true, "V6 PAUSA: g_fxTime congelado em Play+pausa (o "
+                        "contrato do RELATORIO-0.12-Y-E-SKY)");
+        }
+        if (dRetoma <= 50) {
+            ++failures;
+            std::printf("    [FAIL] V6: a retoma não mexe o clima\n");
+        } else {
+            check(true, "V6 RETOMA: o clima volta a cair (d>50 px)");
+        }
+        g_editor.playMode = playAntes;
+        g_editor.paused = false;
+        g_scene.destroy(wx);
+        posePadrao();
+        frameN(2);
+    }
+
+    // ---- V7: O EMISSOR SEGUE A CÂMARA (a pose longe vê chuva na mesma) ---
+    {
+        // a referência NA MESMA POSE (o sinal tem de ser da chuva, não da
+        // cena — a 1.ª run comparou poses diferentes e mediu lixo)
+        g_camera.target = Vec3{2000.0f, 0.0f, 1000.0f};
+        g_camera.dist = 30.0f;
+        g_camera.yaw = 0.9f;
+        g_camera.pitch = 0.35f;
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        const std::vector<u8> refPose = readFrame(&w, &h);
+        const Handle wx = addWeatherTic(AmbientEnvironment::kWeatherRain);
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        g_fxTime = 30.0f;
+        stepFrame(0.0f);
+        const std::vector<u8> fr = readFrame(&w, &h);
+        const long px = particlePixels(fr, refPose, w, h, 270, 180, 1010,
+                                       540);
+        capturePng("C3_follow_cam");
+        g_fxTime = fxSemClima;
+        std::printf("    V7 follow: %ld píxeis de chuva a 2000 do mundo "
+                    "(o volume segue o OLHAR)\n", px);
+        if (px <= 200) {
+            ++failures;
+            std::printf("    [FAIL] V7: a chuva ficou na ORIGEM (o "
+                        "emissor não segue)\n");
+        } else {
+            check(true, "V7 SEGUE A CÂMARA: chuva visível com a câmara "
+                        "longe da origem (followOrigin)");
+        }
+        posePadrao();
+        g_scene.destroy(wx);
+        stepFrame(0.0f);
+    }
+
+    // ---- V8: O PISO EM PÍXEIS (a 200 m a gota 0.015 m era sub-pixel) -----
+    {
+        // a referência NA MESMA POSE (dist 200)
+        g_camera.target = Vec3{0.0f, 0.0f, 0.0f};
+        g_camera.dist = 200.0f;
+        g_camera.pitch = 0.5f;
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        const std::vector<u8> refPose = readFrame(&w, &h);
+        const Handle wx = addWeatherTic(AmbientEnvironment::kWeatherRain);
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        g_fxTime = 40.0f;
+        stepFrame(0.0f);
+        const std::vector<u8> fr = readFrame(&w, &h);
+        const long px = particlePixels(fr, refPose, w, h, 270, 180, 1010,
+                                       540);
+        capturePng("C3_minpx_200m");
+        g_fxTime = fxSemClima;
+        std::printf("    V8 min-px: %ld píxeis de chuva a dist 200 (o piso "
+                    "3 px @720p)\n", px);
+        if (px <= 500) {
+            ++failures;
+            std::printf("    [FAIL] V8: a chuva desaparece ao longe (o "
+                        "piso em píxeis morreu?)\n");
+        } else {
+            check(true, "V8 PISO EM PÍXEIS: chuva a 200 m mantém ≥3 px "
+                        "(sem o piso seria ~sub-pixel — a mutação mede)");
+        }
+        // o ORÇAMENTO do FPS no render real: 90 frames a 25 fps degradam o
+        // count do clima (a EMA < 50) e 240 a 60 fps recuperam
+        g_weatherBudget.scale = 1.0f;
+        for (int i = 0; i < 90; ++i) {
+            stepFrame(1.0f / 25.0f);
+        }
+        const f32 escalaBaixa = g_weatherBudget.scale;
+        for (int i = 0; i < 240; ++i) {
+            stepFrame(1.0f / 60.0f);
+        }
+        const f32 escalaAlta = g_weatherBudget.scale;
+        std::printf("    V10 orçamento: 25 fps → escala %.3f | 60 fps → "
+                    "%.3f\n", (double)escalaBaixa, (double)escalaAlta);
+        if (escalaBaixa >= 1.0f || escalaBaixa <
+                                       fx::WeatherBudget::kScaleMin - 1e-6f) {
+            ++failures;
+            std::printf("    [FAIL] V10: o orçamento não degrada no piso\n");
+        } else {
+            check(true, "V10 ORÇAMENTO: 25 fps degrada o count do clima "
+                        "(piso 0.25)");
+        }
+        if (escalaAlta < 0.999f) {
+            ++failures;
+            std::printf("    [FAIL] V10: 60 fps não recupera o orçamento\n");
+        } else {
+            check(true, "V10 RECUPERAÇÃO: 60 fps devolve o orçamento a "
+                        "1.0");
+        }
+        posePadrao();
+        g_scene.destroy(wx);
+        stepFrame(0.0f);
+    }
+
+    // ---- V9: A RECUPERAÇÃO DE CONTEXTO SEM COSTURA (o clima RAIN) --------
+    {
+        const Handle wx = addWeatherTic(AmbientEnvironment::kWeatherRain);
+        selectCuboByName();
+        for (int i = 0; i < 30; ++i) {
+            stepFrame(1.0f / 60.0f);   // o assentamento (o fade da UI)
+        }
+        g_fxTime = 50.0f;   // o tempo AFOFERRADO (a mesma fase nas duas
+                            // pontas — o mod do VS é puro determinismo)
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        const std::vector<u8> ref = readFrame(&w, &h);
+        const u64 refHash = frameHash(ref);
+        capturePng("C3_ctx_ref");
+        // a PERDA REAL (TERM + INIT — o ciclo do device)
+        onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
+        onAppCmd(&g_app, APP_CMD_INIT_WINDOW);
+        loadFixtureFontIfDead();
+        selectCuboByName();
+        const Handle we2 = addWeTic();   // o WE também morreu no reload
+        (void)we2;
+        const Handle wx2 = addWeatherTic(AmbientEnvironment::kWeatherRain);
+        (void)wx2;   // o reload matou os TICs não gravados — re-criados
+        for (int i = 0; i < 30; ++i) {
+            stepFrame(1.0f / 60.0f);
+        }
+        g_fxTime = 50.0f;   // a MESMA fase (o seeds buffer re-nasce
+                            // determinístico no INIT — o mesmo mod)
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        const std::vector<u8> rec = readFrame(&w, &h);
+        const u64 recHash = frameHash(rec);
+        capturePng("C3_ctx_rec");
+        g_fxTime = fxSemClima;
+        std::printf("    V9 ctx: ref=%016llx rec=%016llx (%s)\n",
+                    (unsigned long long)refHash,
+                    (unsigned long long)recHash,
+                    refHash == recHash ? "EXATO" : "diferente");
+        if (!g_ready) {
+            ++failures;
+            std::printf("    [FAIL] V9: o render não voltou\n");
+        } else if (refHash != recHash) {
+            // a tolerância da casa (o chip do FPS muda o número; o
+            // CONTEÚDO não)
+            long ndiff = 0;
+            int maxDelta = 0;
+            const size_t np = ref.size() < rec.size() ? ref.size()
+                                                      : rec.size();
+            for (size_t o = 0; o + 3 < np; o += 4) {
+                if (std::memcmp(&ref[o], &rec[o], 4) != 0) {
+                    ++ndiff;
+                    for (int k = 0; k < 4; ++k) {
+                        const int d =
+                            std::abs(int(ref[o + k]) - int(rec[o + k]));
+                        if (d > maxDelta) maxDelta = d;
+                    }
+                }
+            }
+            const double tolPct =
+                100.0 * double(ndiff) / double(w * h);
+            std::printf("    [dbg] diff=%ld px (%.3f%%) maxDelta=%d\n",
+                        ndiff, tolPct, maxDelta);
+            if (tolPct < 0.5 && maxDelta <= 32) {
+                check(true, "V9 CONTEXTO: o clima RAIN volta sem costura "
+                            "(dentro da tolerância do dono)");
+            } else {
+                ++failures;
+                std::printf("    [FAIL] V9: o frame pós-perda diverge do "
+                            "REF\n");
+            }
+        } else {
+            check(true, "V9 CONTEXTO: o clima RAIN volta EXATO após "
+                        "TERM/INIT (o hash de píxeis igual)");
+        }
+        g_scene.destroy(wx2);
+    }
+
+    // o relatório da fase
+    std::printf("    clima: falhas=%d\n", failures);
+    prova("clima concluído (as capturas C3_* + os números acima)");
+    check(failures == 0, "o clima passou TODAS as provas por render");
+    return failures;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     const bool fuzzMode = argc > 1 && std::strcmp(argv[1], "--fuzz") == 0;
     const bool sky2Mode = argc > 1 && std::strcmp(argv[1], "--sky2") == 0;
+    const bool climaMode = argc > 1 && std::strcmp(argv[1], "--clima") == 0;
     const int sky2Poses = argc > 2 ? std::atoi(argv[2]) : 200;
     const int fuzzCycles = argc > 2 ? std::atoi(argv[2]) : 1000;
     const u32 fuzzSeed = argc > 3 ? static_cast<u32>(std::strtoul(argv[3], nullptr, 10)) : 0xC0FFEEu;
@@ -894,6 +1369,13 @@ int main(int argc, char** argv) {
         const int f = sky2Run(sky2Poses);
         onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
         std::printf("\n%s (falhas=%d)\n", f ? "SKY2 FALHOU" : "SKY2 OK", f);
+        return f ? 1 : 0;
+    }
+    if (climaMode) {
+        // FASE 3: o clima visível usa o MESMO boot
+        const int f = climaRun();
+        onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
+        std::printf("\n%s (falhas=%d)\n", f ? "CLIMA FALHOU" : "CLIMA OK", f);
         return f ? 1 : 0;
     }
 

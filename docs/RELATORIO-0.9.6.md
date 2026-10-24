@@ -965,3 +965,24 @@ c33 1113/0 · **versionCode 133** — o par declarado aqui e no build
 config.
 
 
+
+### §14-x — 0.12-Z2 F3 (o clima visível + o P0 do uLifetime) — versionCode 134
+
+**G8** (o par declarado no MESMO commit, a regra do §14): O ACHADO P0 —
+o uniform uLifetime NUNCA era carregado pelo draw das partículas (o
+uniform ficava 0.0 → mod(x,0)=NaN → TODOS os vértices morriam no clip —
+o sistema NÃO desenhava NENHUM píxel no driver real desde a 0.12-Y-F1; o
+stub do CI conta draws, a prova de píxeis da FASE 3 apanhou) + o CLIMA
+VISÍVEL: o piso em píxeis (kMinParticlePx 3.0 — o max() com o w do centro
+no VS), o emissor a seguir ao OLHAR da câmara (followOrigin + uSpawnScale,
+os raios 6/5 pela densidade), o orçamento do FPS (a EMA 50/58, piso 0.25,
+SÓ o clima), o spawnRadius no .goni ("rad" opcional) e no Inspector
+(PeSpawn 5448 + o rowCount 8→9), o ACHADO F3 (a pausa não congelava os
+relógios do render — clockFrozen), o NONE que repõe o jorro. As provas
+POR PÍXEL: chuva 1431 / neve 1627 / trovoada 1986 px, o follow 6984 px a
+2000 do mundo, o piso 1805 px a 200 m, a recuperação de contexto EXATA
+(V9), a pausa/retoma (2335 px) — o --clima V1..V10 0 falhas + o VLM
+(trovoada/neve visíveis). R-073 + os 4 pins novos (a mutação VERMELHA ao
+vivo: o max() e o upload do uLifetime) · raster_z2 27/0 · raster_z2
+--clima 0/0 · raster_z2 --fuzz 150/0 · test_core 0 falhas · c33 1113/0 ·
+**versionCode 134** — o par declarado aqui e no build config.

@@ -405,3 +405,201 @@ nunca tocados pelo céu.
 | A reposição automática NaN/limites avisa na Consola | PROVADO | cameraEnsureSane (main.cpp:1067, o elog::warn) + o c33 |
 | O céu HDRI pinta o ecrã | REFUTADO (não existe — é AMBIENTE CPU) | o código (a média CPU ilumina o lit; o céu é clear/procedural) — a falha de import nunca pode pintar o ecrã |
 | O teste mediump-forçado (fp16) | NÃO VERIFICADO | o llvmpipe é fp32 (a spec do driver) — entra na VERIFICAÇÃO NO DISPOSITIVO |
+
+# FASE 3-Z2 — O CLIMA VISÍVEL (0.12-Z2 F3)
+
+## F3-Z2.0 — O ACHADO P0: O SISTEMA DE PARTÍCULAS NUNCA RENDERIZOU (a cura antes de tudo)
+
+- **ANTES (PROVADO pela bissecção do GLES real, a sessão F3)**: o clima não
+  pintava NENHUM píxel em nenhuma configuração de passes. A bissecção
+  eliminou estado (blend/cull/depth/scissor/viewport — dumps ao vivo),
+  câmara (uVP lido do driver), VAO/attribs (en/div/buf no draw), seeds
+  (lidos de volta do VBO: reais) e buffers. O dump dos UNIFORMS VIVOS
+  (`glGetUniformfv`) apanhou o culpado: **`uLifetime=(0.00)`** — o draw da
+  engine NUNCA carregou o uniform → `mod(uTime+seed·100, 0.0)` = NaN →
+  TODOS os vértices morrem no clip → zero fragmentos. O sistema não
+  desenhava UM píxel desde a 0.12-Y-F1; o stub do CI conta draws e nunca
+  viu fragmentos; a hipótese F0.4 («sub-pixel») era só a METADE do problema.
+- **DEPOIS (PROVADO, --clima V1)**: o upload `glUniform1f(locLifetime_,
+  p.lifetime)` (ANTES do uTime — o ÚLTIMO 1f intacto) → chuva 1431 px,
+  neve 1627 px, trovoada 1986 px na região central a 720p. A sentinela
+  R-073 aferra o upload E a ordem; a mutação (remover) fica VERMELHA.
+
+## F3-Z2.1 — O INVENTÁRIO DOS TICs DE CLIMA (o pedido: a lista completa)
+
+1. **AmbientEnvironment** (components/AmbientEnvironment.h) — o CLIMA:
+   weatherType NONE(0)/RAIN(1)/SNOW(2)/STORM(3), intensity 0..1, o preset
+   `applyWeatherPreset` (linha 78) e a trovoada `updateStorm` (linha 141,
+   o flash via uThunderFlash no FS do céu — sem geometria de raio).
+2. **ParticleEmitter** (components/ParticleEmitter.h) — o GPU emitter que
+   o clima CONFIGURA (a DECISÃO de arquitetura do dono: o clima não
+   renderiza — escreve o emissor do MESMO TIC). F3: + spawnRadius.
+3. **WindTIC** (components/WindTIC.h) — o VENTO GLOBAL (a fonte pura
+   `windVector`); o 1.º WindTIC ativo alimenta o uWind do VS.
+4. **Environment** (components/Environment.h) — o DIA/NOITE (timeOfDay,
+   autoCycle, dayCycleSpeed — o relógio do render, congelado na pausa).
+5. O flash da trovoada no FS do céu (SkyRenderer kFsSrc uThunderFlash).
+
+## F3-Z2.2 — O TAMANHO MÍNIMO EM PÍXEIS (o pedido: 2–3 px @720p)
+
+- A FONTE ÚNICA `fx::kMinParticlePx = 3.0f` (ParticleShader.h) + a pura
+  `minWorldPerDepth(minPx, tanHalf, viewH)` = minPx·2·tanHalf/viewH (o
+  tamanho-mundo que projeta minPx píxeis a profundidade 1) + `minWorldOrtho`
+  (o w do clip fica 1.0 na orto) + `tanHalfFovDeg` (o deg2rad da casa).
+- O VS replica: `vec4 center = uVP*vec4(p,1); if (center.w>0) sz =
+  max(sz, uMinWorldPerDepth*center.w);` — o piso pela PROFUNDIDADE REAL do
+  centro. O main calcula partMinW pela câmara do frame (a orbit fovY rad /
+  a de cena fovY graus / a orto) e pela ALTURA EM PÍXEIS do viewport GL
+  real (o rect no editor, o ecrã no Play).
+- **PROVADO (--clima V8)**: chuva a dist 200 → 1805 píxeis medidos por
+  diferença (a captura C3_minpx_200m.png; sem o piso a gota 0.015 m media
+  0.045 px — sub-pixel). O pin weather_min_px_pura aferra a conta (o
+  piso·7 excede a gota do preset) e o VS (o uniform + o max SEM comentários).
+
+## F3-Z2.3 — O EMISSOR SEGUE A CÂMARA (o pedido: o volume do mundo)
+
+- A 1.ª run do --clima PROVOU que seguir o OLHO põe o volume fora do
+  frustum descendente (0 px); o design final: **o clima vive À VOLTA do
+  que a câmara OLHA** — no editor o target da orbit (eye+fwd·dist pela
+  MESMA base), em Play eye+fwd·(raio·0.5) — e `followOrigin(alvo, raio) =
+  alvo + (0, raio·0.5, 0)` (o volume ACIMA do alvo: a chuva nasce a cair).
+- O volume: o buffer de seeds nasce unitário ×kSpawnRadius (0.15) e NUNCA
+  regenera — o raio do clima escala no VS por `uSpawnScale =
+  spawnRadius/0.15` (`aOriginSeed.xyz * uSpawnScale`). Os presets
+  transportam o raio: RAIN/STORM 6, SNOW 5 (a densidade do count do dono:
+  1500 num raio 6 forma o cortinado que o frustum cruza — o raio 14 da
+  1.ª tentativa espalhava num volume 10× maior e o frustum ficava vazio,
+  PROVADO). O NONE repõe o jorro 0.15. O campo `spawnRadius` é serializado
+  opcional ("rad", só ≠ default — o .goni antigo carrega byte a byte) com
+  a linha do Inspector PeSpawn (5448, slider 0.15..60 + clampFields).
+- **PROVADO (--clima V7)**: a câmara a 2000 do mundo → 6984 píxeis de
+  chuva NA MESMA POSE (a referência capturada na própria pose — a
+  metodologia da 1.ª run comparava poses diferentes e media lixo).
+
+## F3-Z2.4 — O ORÇAMENTO DO FPS (o pedido: degradação automática)
+
+- `fx::WeatherBudget` (ParticleShader.h — a fonte única): a EMA do dt real
+  (α 0.1); fps < 50 → scale ×0.85 até ao piso 0.25; fps > 58 → recupera
+  (o histerético); o count = teto × scale (arredondado, piso 1, nunca
+  acima do pedido). **SÓ os emissores do CLIMA** (TIC com
+  AmbientEnvironment ativo ≠ NONE) — o jorro do utilizador nunca é tocado.
+  O step corre por frame com o dt CONGELADO na pausa (o mesmo frozen dos
+  relógios de render).
+- **PROVADO**: o pin weather_budget_mecan (dt sintético: 40 fps degrada
+  até ao piso, 60 fps recupera, dt 0 não mexe, a banda 50..58 estável, o
+  count 1500×0.25=375) + o --clima V10 no GLES real (25 fps → 0.250;
+  60 fps → 1.000). Os NÚMEROS do Mali GE8320 entram na VERIFICAÇÃO NO
+  DISPOSITIVO (o llvmpipe não tem o orçamento do chip).
+
+## F3-Z2.5 — AS PROVAS POR TIPO (--clima V1..V10, exit 0, 0 falhas)
+
+| Prova | Veredicto | Números |
+|---|---|---|
+| V1 chuva VISÍVEL | PROVADO | 1431 px (centro 720p) |
+| V1 neve VISÍVEL | PROVADO | 1627 px |
+| V1 trovoada VISÍVEL | PROVADO | 1986 px |
+| V2 MOVIMENTO (uTime vivo) | PROVADO | hash(t)≠hash(t+0.5) |
+| V3 CICLO DE VIDA (o mod volta) | PROVADO | t vs t+1.2s = 0.031% de px (o ruído f32 do mod; Δ≤2) |
+| V4 VENTO (o WindTIC desvia) | PROVADO | hash muda; 1208 px de sinal |
+| V5 NONE SILENCIA | PROVADO | maxParticles=0 + o raio de volta ao jorro |
+| V6 PAUSA CONGELA / RETOMA | PROVADO | g_fxTime parado (0.05→0.05); a retoma 2335 px |
+| V7 SEGUE A CÂMARA | PROVADO | 6984 px a 2000 do mundo |
+| V8 PISO EM PÍXEIS | PROVADO | 1805 px a dist 200 |
+| V10 ORÇAMENTO | PROVADO | 25 fps→0.250; 60 fps→1.000 |
+| V9 CONTEXTO SEM COSTURA | PROVADO | TERM/INIT → o hash de píxeis EXATO (a tolerância nem entrou) |
+
+- O VLM (z-ai-web-dev-sdk createVision) sobre as capturas DEPOIS:
+  C3_trovoada: «há partículas de chuva (pontos claros espalhados pelo
+  ar)… a grelha 3D está visível e inteira… não há zona escura ou azul
+  fixa a cortar… o cubo e os gizmos estão visíveis»; C3_neve: «há flocos
+  de neve visíveis… pontos brancos espalhados por toda a área da
+  viewport». Nota honesta: a C3_minpx_200m tem os 1805 px medidos por
+  diferença mas visualmente subtis (3 px por gota a 200 m) — o VLM não
+  as aponta a olho; o piso é provado pelo NÚMERO.
+
+## F3-Z2.6 — O ACHADO F3: A PAUSA NÃO CONGELAVA OS RELÓGIOS DO RENDER
+
+- **ANTES (PROVADO, ficheiro:linha)**: o `frozen` do loop (main.cpp) só
+  parava os PASSOS FIXOS (`g_time.beginFrame`) — `g_fxTime`, `g_skyTime`,
+  o ciclo do dia e o update da trovoada avançavam em Play+pausa (o
+  dt real entrava neles SEMPRE). O contrato documentado («a pausa congela
+  o céu» — RELATORIO-0.12-Y-E-SKY.md §Y-E; «a pausa congela» — o
+  cabeçalho do g_fxTime) NÃO se cumpria.
+- **DEPOIS**: `clockFrozen = playMode && paused` — os relógios de render
+  (g_skyTime/g_fxTime), o ciclo do dia, o orçamento e o dt da trovoada
+  recebem 0 quando congelados. O editor e o Play a correr avançam como
+  sempre (o pin V6 aferra: 20 frames reais em pausa → fxTime idêntico; a
+  retoma mexe 2335 px).
+
+## F3-Z2.7 — O RELATÓRIO DE 16 ITENS (FASE 3-Z2)
+
+1. **Objetivo**: os TICs de clima visíveis no driver real (a lista, o
+   tamanho mínimo em píxeis, o emissor a seguir a câmara, o orçamento do
+   FPS, a recuperação de contexto, a pausa, o Inspector com clamp).
+2. **Causa raiz (ficheiro:linha)**: (P0) ParticleRenderer.cpp draw() — o
+   upload do uLifetime NUNCA existiu → mod(x,0)=NaN → zero fragmentos;
+   (F0.4) os presets 0.015 m ≈ 1.3 px @720p sem piso; (F3) o emissor
+   preso à origem do TIC; (F3) os relógios do render fora do frozen.
+3. **Sintomas cobertos**: «o clima não funciona no device» (o §F0.4 da
+   0.12-Z) — as 4 causas fechadas (a sonda, o congelamento, o
+   sub-pixel, o emissor fora de vista).
+4. **O que mudou**: ParticleRenderer.{h,cpp} (o P0 + os 2 uniforms novos),
+   ParticleShader.h (as puras + o VS + o orçamento), ParticleEmitter.h
+   (spawnRadius), AmbientEnvironment.h (os raios + o NONE), main.cpp (o
+   alvo + o orçamento + os relógios congelados + partMinW),
+   SceneSerializer.cpp ("rad"), EditorLayout.h/EditorUi.cpp (a linha
+   PeSpawn + o rowCount 8→9), os pins test_012z2_f3.cpp + a sentinela
+   R-073 + o raster_z2 --clima.
+5. **O que NÃO foi tocado**: V.ONI, os importadores, a física, o .gmesh,
+   o layout dos painéis (a linha PeSpawn entra na secção que já existia).
+6. **A ordem dos passes**: intacta (a F0-Z2.4; o clima desenha depois da
+   geometria, antes da grelha — a bissecção por toggles re-confirmou
+   cada passe inocente).
+7. **A decisão do tamanho**: kMinParticlePx=3.0 (o teto do intervalo
+   2–3 px do dono — o piso visível no Mali); os raios 6/5 pela densidade
+   do count do dono (documentado no fonte).
+8. **A grelha/gizmos**: intocados (o clima desenha com depth write OFF —
+   nunca oclui; o depth test ON respeita o mundo).
+9. **O WorldEnvironment**: intacto (o NÉVOA/lit byte a byte; o clima não
+   toca o WE — o V1 correu COM WE procedural).
+10. **A precisão**: o VS das partículas em highp (já era); o piso em
+    píxeis é f32 puro (sem fp16 no caminho). O mediump-forçado segue
+    NÃO VERIFICADO no hospedeiro (o llvmpipe é fp32) — VERIFICAÇÃO NO
+    DISPOSITIVO.
+11. **Testes**: test_core 0 falhas (os 4 pins novos + a sentinela) ·
+    c33_virtual 1113/0 · raster_z2 27/0 · raster_z2 --clima 0 falhas ·
+    raster_z2 --fuzz 150/0.
+12. **Mutações**: o max() do VS removido → R-073 VERMELHO; o upload do
+    uLifetime removido → R-073 VERMELHO — repostos, VERDE (ao vivo).
+13. **Capturas**: docs/capturas-0.12-Z2/C3_chuva/neve/trovoada/follow_cam/
+    minpx_200m/ctx_ref/ctx_rec (a 1.ª chuva VISÍVEL da história da
+    engine no driver real).
+14. **O VLM**: colado em F3-Z2.5 (trovoada + neve; a nota honesta do
+    200 m).
+15. **Riscos**: o P0 muda TODAS as cenas com emissores (a partir de agora
+    elas DESENHAM — as golden images da FASE 5 nascem DEPOIS deste
+    commit); o orçamento no device pode degradar mais cedo (o Mali
+    reporta o fps real — VERIFICAÇÃO NO DISPOSITIVO); o raio 6/5 é a
+    minha decisão de densidade (o dono pode querer outro — o slider
+    PeSpawn edita).
+16. **Próximo passo**: FASE 4-Z2 — a auditoria total (a toolchain, os
+    bugs 4.2, a caixa preta) e a FASE 5-Z2 (as golden images com a
+    chuva viva).
+
+## TABELA DE RÓTULOS (FASE 3-Z2)
+
+| Afirmação | Rótulo | Prova |
+|---|---|---|
+| O sistema de partículas não desenhava NENHUM píxel no driver real | PROVADO | o dump dos uniforms vivos (uLifetime=0.0) + a bissecção por toggles/passes/estado + a cura (V1: 1431 px) |
+| O uniform uLifetime nunca era carregado pelo draw | PROVADO | o fonte (sem o upload) + o dump do driver + a mutação R-073 vermelha |
+| A gota 0.015 m era sub-pixel a 720p (o F0.4) | PROVADO | a conta (0.045 px a 200 m) + o piso cura (1805 px a 200 m) |
+| Cada tipo de clima é VISÍVEL a 720p | PROVADO | V1: 1431/1627/1986 px + o VLM (trovoada/neve) |
+| O emissor do clima segue a câmara | PROVADO | V7: 6984 px a 2000 do mundo |
+| A chuva cai (o uTime vivo) | PROVADO | V2: hash(t)≠hash(t+0.5) |
+| O ciclo de vida fecha | PROVADO | V3: 0.031% de px (o ruído f32; Δ≤2) |
+| O vento desvia a chuva | PROVADO | V4: o hash muda |
+| O NONE silencia e repõe o jorro | PROVADO | V5: maxParticles=0, raio 0.15 |
+| A pausa congela o clima (o contrato Y-E) | PROVADO | V6 + o fix clockFrozen (o ACHADO F3) |
+| A recuperação de contexto é sem costura | PROVADO | V9: o hash EXATO pós TERM/INIT |
+| O orçamento degrada/recupera | PROVADO | V10 + o pin (o mecanismo); os números do Mali — NÃO VERIFICADO (o llvmpipe) → VERIFICAÇÃO NO DISPOSITIVO |
+| O teste mediump-forçado (fp16) | NÃO VERIFICADO | o llvmpipe é fp32 — VERIFICAÇÃO NO DISPOSITIVO |

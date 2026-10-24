@@ -210,6 +210,7 @@ constexpr u64 kInspectorPeColA  = 5444;   // "cor início: #RRGGBB" (hex 16)
 constexpr u64 kInspectorPeColB  = 5445;   // "cor fim: #RRGGBB" (hex 17)
 constexpr u64 kInspectorPeGrav  = 5446;   // slider gravidade Y -20..20
 constexpr u64 kInspectorPeTex   = 5447;   // "textura: ..." (o NAVEGADOR)
+constexpr u64 kInspectorPeSpawn = 5448;   // 0.12-Z2 F3: slider raio spawn 0.15..60
 // 0.12-Y-F2 — VENTO (faixa 5450..5453)
 constexpr u64 kInspectorWindDirX = 5450;  // slider vento x -1..1
 constexpr u64 kInspectorWindDirY = 5451;  // slider vento y -1..1
@@ -457,6 +458,7 @@ struct InspRow {
         PeColA,      // "cor início: #RRGGBB" + swatch (teclado hex 16)
         PeColB,      // "cor fim: #RRGGBB" + swatch (teclado hex 17)
         PeGrav,      // slider gravidade Y -20..20 (o caso real: fogo/chuva)
+        PeSpawn,     // 0.12-Z2 F3: slider raio do volume de spawn 0.15..60
         PeTex,       // botão "textura: <nome|procedural>" (o NAVEGADOR)
         // 0.12-Y-F2 — VENTO + CLIMA (as secções do WindTIC/AmbientEnvironment)
         WindSection, // cabeçalho "Wind" + separador
@@ -624,7 +626,10 @@ inline u32 inspectorRowCount(const InspProfile& p, bool selectable,
     if (p.pe) {
         n += 1;
         if (!(collapsed & kInspBitParticles)) {
-            n += 8;
+            // 0.12-Z2 F3: 8→9 (o raio do volume de spawn entrou — a
+            // fórmula manda casar com o plano, o pin particle_inspector
+            // aferra o par)
+            n += 9;
         }
     }
     // ---- ENVIRONMENT (bit8 — 0.12-Y-fix): o WorldEnvironment -------------
@@ -856,6 +861,7 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
             push(InspRow::Kind::PeColA, btnH, kInspectorPeColA);
             push(InspRow::Kind::PeColB, btnH, kInspectorPeColB);
             push(InspRow::Kind::PeGrav, sldH, kInspectorPeGrav);
+            push(InspRow::Kind::PeSpawn, sldH, kInspectorPeSpawn);   // F3-Z2
             push(InspRow::Kind::PeTex, btnH, kInspectorPeTex);
         }
     }

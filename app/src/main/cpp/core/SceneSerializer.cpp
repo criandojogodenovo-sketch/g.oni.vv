@@ -1463,6 +1463,11 @@ void appendComponentJson(Json& arr, const ParticleEmitter* pe) {
     if (!pe->texturePath.empty()) {
         c.addMember("tex", Json::makeString(pe->texturePath));
     }
+    // 0.12-Z2 F3 — o volume de spawn (o default é o jorro da F1: o .goni
+    // antigo carrega byte a byte)
+    if (pe->spawnRadius != ParticleEmitter::kSpawnRadiusDefault) {
+        c.addMember("rad", Json::makeNumber(pe->spawnRadius));
+    }
     arr.addItem(std::move(c));
 }
 
@@ -1511,6 +1516,10 @@ void fillParticleEmitter(ParticleEmitter* pe, const Json& comp) {
     if (const Json* j = comp.find("tex");
         j && j->type == Json::Type::String) {
         pe->texturePath = j->string;
+    }
+    if (const Json* j = comp.find("rad");
+        j && j->type == Json::Type::Number) {
+        pe->spawnRadius = static_cast<f32>(j->number);
     }
     pe->clampFields();
 }

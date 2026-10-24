@@ -18,11 +18,13 @@
 // Os presets (a ordem do dono — os valores EXATOS do prompt):
 //   RAIN  → gravidade (0,-12,0) · vel (0,-18,0) · vida 1.2s · tamanho
 //           0.015→0.015 · cor (0.6,0.7,0.9,0.7)→(0.6,0.7,0.9,0) ·
-//           máx 1500×intensity
+//           máx 1500×intensity · raio 14 (0.12-Z2 F3 — o volume do clima)
 //   SNOW  → gravidade (0,-1.2,0) · vel (0,-2,0) · vida 4s · tamanho
-//           0.04→0.02 · cor (1,1,1,0.9)→(1,1,1,0) · máx 800×intensity
-//   STORM → igual à chuva com máx 2000×intensity
-//   NONE  → maxParticles 0 (o emissor silencia — o draw salta)
+//           0.04→0.02 · cor (1,1,1,0.9)→(1,1,1,0) · máx 800×intensity ·
+//           raio 12 (0.12-Z2 F3)
+//   STORM → igual à chuva com máx 2000×intensity · raio 14 (0.12-Z2 F3)
+//   NONE  → maxParticles 0 + o raio de volta ao jorro (o emissor
+//           silencia — o draw salta; o emissor fica COMO ANTES do clima)
 //
 // GLES 3.0: NADA de compute shaders — tudo o que aqui vive é DADOS.
 #include "core/Component.h"
@@ -44,6 +46,13 @@ public:
     static constexpr i32 kRainCount  = 1500;
     static constexpr i32 kSnowCount  = 800;
     static constexpr i32 kStormCount = 2000;
+    // os RAIOS do volume de spawn do clima (0.12-Z2 F3 — o emissor vive
+    // num volume À VOLTA do que a câmara OLHA; o raio manda na DENSIDADE
+    // do count do dono: 1500 partículas num raio 6 formam o cortinado que
+    // o frustum cruza — um raio 14 espalhava o mesmo count num volume 10×
+    // maior e o frustum ficava vazio, PROVADO pela 1.ª run do --clima)
+    static constexpr f32 kRainRadius = 6.0f;
+    static constexpr f32 kSnowRadius = 5.0f;
     // a trovoada: o flash morre a 3.0/s (vive ~0.33 s), o próximo raio
     // em [3,8] s
     static constexpr f32 kThunderDecay    = 3.0f;
@@ -94,6 +103,7 @@ public:
                 pe->endColor[2]   = 0.9f;  pe->endColor[3]   = 0.0f;
                 pe->maxParticles  = static_cast<i32>(
                     static_cast<f32>(kRainCount) * intensity);
+                pe->spawnRadius  = kRainRadius;   // 0.12-Z2 F3: o volume
                 pe->clampFields();
                 break;
             case kWeatherSnow:
@@ -110,6 +120,7 @@ public:
                 pe->endColor[2]   = 1.0f;  pe->endColor[3]   = 0.0f;
                 pe->maxParticles  = static_cast<i32>(
                     static_cast<f32>(kSnowCount) * intensity);
+                pe->spawnRadius  = kSnowRadius;   // 0.12-Z2 F3: o volume
                 pe->clampFields();
                 break;
             case kWeatherStorm:
@@ -126,10 +137,14 @@ public:
                 pe->endColor[2]   = 0.9f;  pe->endColor[3]   = 0.0f;
                 pe->maxParticles  = static_cast<i32>(
                     static_cast<f32>(kStormCount) * intensity);
+                pe->spawnRadius  = kRainRadius;   // 0.12-Z2 F3: o volume
                 pe->clampFields();
                 break;
-            default:   // NONE — o emissor silencia (o 0 é o contrato)
+            default:   // NONE — o emissor silencia (o 0 é o contrato) e
+                       // volta ao JORRO (o raio de fábrica — o emissor
+                       // fica como antes do clima)
                 pe->maxParticles = 0;
+                pe->spawnRadius = ParticleEmitter::kSpawnRadiusDefault;
                 break;
         }
         return true;
