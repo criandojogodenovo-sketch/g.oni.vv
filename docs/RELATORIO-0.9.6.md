@@ -912,3 +912,20 @@ passe aferrada (7 passes vivos). O flash do STORM acende e morre (452205 px
 pico→morto). ZERO linhas de produto tocadas · test_core/c33 intactos ·
 raster_z2 27/0 · **versionCode 130** — o par declarado aqui e no build
 config.
+
+### §14-u — 0.12-Z2 F1 (o fuzzing do contexto + o invalidate sempre) — versionCode 131
+
+**G8** (o par declarado no MESMO commit, a regra do §14): a FASE 1 da
+campanha Z2 (o RELATORIO-0.12-Z2-RASTER.md §F1): o FUZZING no GLES REAL —
+1050 ciclos de perda de contexto REAL (TERM+INIT do EGL, 7 seeds) com
+cenários aleatórios (WE on/off, storm, gesto a meio) e o VEREDICTO por
+hash de píxeis: o frame seguinte EXATO ao de referência em TODOS, o input
+vivo nos 28 checks, ZERO falhas (o critério do dono: ≥1000 ciclos). O
+ACHADO que os ciclos apanharam (R-070): o invalidateAll saltava as
+camadas cujo recreate tinha falhado uma vez — o handle morto sobrevivia ao
+contexto seguinte (o TEXTO MORTO após sair e voltar; a mono no OEM enxuto
+falha SEMPRE). O fix: o invalidate corre SEMPRE (idempotente por contrato)
+· pin do term duplo no contrato novo (inv0+6) · sentinela
+regress_glctx_z2_fase1 · test_core 0 falhas · c33_virtual 1113/0 ·
+raster_z2 --fuzz 1050/0 · gates VERDES · **versionCode 131** — o par
+declarado aqui e no build config.

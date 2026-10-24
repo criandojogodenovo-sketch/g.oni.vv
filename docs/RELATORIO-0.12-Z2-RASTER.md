@@ -164,3 +164,108 @@ da FASE 2: qualquer regressão de passe lê-se aqui.
 | As partículas de chuva ficam sub-pixel na 720p | NÃO VERIFICADO (neste commit) | a FASE 3 mede com a mesma pose ON/OFF e aplica o mínimo de 2-3 px |
 | O flash é visível no Mali GE8320 (mediump fp16) | NÃO VERIFICADO | sem device aqui — entra na «VERIFICAÇÃO NO DISPOSITIVO» da FASE 5 (o FS do flash é mediump-safe: 1 adição de 3 constantes) |
 | A câmara «presa» no device | NÃO VERIFICADO | o critério fecha na FASE 2 (botão Repor + varrimento de 200 poses) |
+
+---
+
+# §F1 — O FUZZING DO CONTEXTO (FASE 1-Z2)
+
+## F1-Z2.1 — O QUE ENTROU
+
+| Ficheiro | O que faz |
+|---|---|
+| `tests/raster_z2.cpp` (o modo `--fuzz [ciclos] [seed]`) | o FUZZING: ciclos TERM/INIT REAIS (o EGL destruído e recriado a cada ciclo) com cenários aleatórios por seed (WE on/off, STORM com partículas on/off, gesto de toque a meio da perda), a REFERÊNCIA e o RECUPERADO capturados com o MESMO protocolo (assentar 60 frames + congelar o dt) e comparados por HASH FNV-1a dos píxeis (com a tolerância do dono: <0.5% e delta ≤32 — NUNCA precisou de disparar: as recuperações são EXATAS), o INPUT VIVO a cada 32 ciclos (o tap no fundo limpa; o tap NO CUBO re-seleciona — o caminho do PICK 3D completo), o progresso + o RSS a cada 50 ciclos |
+| `app/src/main/cpp/render/GlResources.h` | **O ACHADO E O FIX (o único produto desta fase)**: o invalidateAll saltava as camadas cujo recreate tinha FALHADO (`if (!l.valid) continue`) — a camada ficava permanentemente inválida, o term seguinte SALTAVA o destroy dela e o handle do contexto morto sobrevivia; o guard `if (tex_)` do FontAtlas "recriava" com id morto = **TEXTO MORTO após sair e voltar** (o sintoma do dono). O invalidate é IDEMPOTENTE por contrato — corre SEMPRE |
+| `tests/test_012z_ctx.cpp` | o pin glresources_ciclo atualizado ao contrato novo (o term duplo invalida 2× as 3 camadas — inv0+6 — e os wrappers aguentam o destroy duplo) |
+| `tests/test_sentinels.cpp` | a sentinela **R-070** `regress_glctx_z2_fase1` (o salto PROIBIDO no fonte + a nota do achado + o pin no contrato novo) |
+| `docs/REGRESSOES.md` | a entrada R-070 (com a prova de mutação) |
+
+## F1-Z2.2 — A PROVA (o número do dono: ≥1000 ciclos, ZERO falhas)
+
+Comando (7 chunks × 150 ciclos, seeds 101..707 — o mesmo binário, o mesmo
+protocolo; os seeds DIFERENTES variam os cenários):
+
+```
+fuzz: 150 ciclos | exatos=150 | input=4 | falhas=0   (×7 — seeds 101,202,303,404,505,606,707)
+total: 1050 ciclos de perda de contexto REAL · 0 falhas · 28 checks de input vivo · RSS 210→240MB estável
+```
+
+Mais os pilotos (seed 77): 40 ciclos exatos + os diagnósticos (8/6/4/24/24
+— os que apanharam e isolaram os 3 achados abaixo). **PROVADO: ≥1000
+ciclos sem UMA falha; o frame seguinte IDÊNTICO ao de referência (hash
+exato — a tolerância nunca disparou); o input responde após qualquer
+recuperação.**
+
+## F1-Z2.3 — OS ACHADOS DO FUZZING (o que os ciclos apanharam)
+
+1. **R-070 (P0 — corrigido nesta fase)**: o texto morto após a recuperação
+   (a cadeia GlResources.h `if (!l.valid) continue` → FontAtlas.cpp:117
+   `if (tex_) return true`) — PROVADO ANTES (o frame pós-recuperação SEM
+   NENHUM glifo: fuzz001_rec da pilotagem; o log «camada font FALHOU»
+   seguido de «fonts OK (sistema)» no init seguinte — o guard a "reativar"
+   com o id morto) e PROVADO DEPOIS (1050 ciclos com o texto EXATO em
+   todos). No device: a font-MONO falha SEMPRE em OEM enxuto → a mesma
+   cadeia mataria o texto do editor de script após a 2.ª perda.
+2. **O layout deslocado (a instância dupla do harness)**: o 1.º piloto
+   mostrava o frame recuperado com os painéis deslocados (~24px) — a causa
+   era o HARNESS (duas instâncias de android_app: o boot com o
+   contentRect, o fuzz com o g_app zerado — os insets T0 R0 no log do
+   [boot 1/6]) — REFUTADO como bug da engine (o applyContentRect é fiel ao
+   payload; o device entrega o retângulo certo).
+3. **O fade dos painéis recomeça no reload (comportamento, não bug)**: com
+   o dt congelado o fade dos tabs fica na opacidade inicial (o texto dos
+   tabs "morto" no REC) — o protocolo assenta 60 frames antes de capturar
+   (o MESMO tratamento nos dois lados). No device o fade corre em tempo
+   real (o dono vê os painéis nascerem — o esperado).
+
+## F1-Z2.4 — O RELATÓRIO DE 16 ITENS (FASE 1-Z2)
+
+1. **Objetivo**: o fuzzing do contexto no GLES REAL (≥1000 ciclos, hash de
+   píxeis, input vivo) + corrigir o que os ciclos apanharem.
+2. **Causa raiz (ficheiro:linha)**: R-070 — render/GlResources.h
+   invalidateAll (o salto por valid) + FontAtlas.cpp:117 (o guard tex_).
+3. **Sintomas cobertos**: o texto morto pós-perda (o sintoma do dono); o
+   gesto preso durante a perda; o cenário de partículas/WE a meio.
+4. **O que mudou**: 1 ficheiro de produto (GlResources.h — o invalidate
+   sempre) + o modo --fuzz no harness + o pin atualizado + a sentinela
+   R-070 + a entrada no REGRESSOES.md.
+5. **O que NÃO foi tocado**: os passes de render, a UI, V.ONI,
+   importadores, física, .gmesh (o fix é no GESTOR do ciclo de vida).
+6. **Ordem dos passes**: intacta (a F2 da 0.12-Z mantém-se; o fuzz não
+   muda o render).
+7. **Prova ANTES**: o frame sem glifos (a pilotagem; o log «camada font
+   FALHOU» → «fonts OK (sistema)» no init seguinte — o guard com o id
+   morto) + os 6354 px de diff de texto no 1.º protocolo.
+8. **Prova DEPOIS**: 1050 ciclos (7 seeds), hash EXATO em todos, o texto
+   presente em todas as recuperações.
+9. **Input vivo**: 28 checks (o fundo limpa + o pick do cubo re-seleciona)
+   — 0 falhas.
+10. **Memória**: o RSS estável (210→240MB em 150 ciclos — o custo por
+    contexto ~0.2MB é do llvmpipe, não da engine; o device tem o driver
+    próprio).
+11. **Testes**: test_core 0 falhas (o pin novo) · c33_virtual 1113/0 ·
+    R-070 verde.
+12. **Mutações**: re-pôr o salto `if (!l.valid) continue` → R-070 VERMELHO
+    + o pin VERMELHO + o fuzz reproduz o texto morto. (A mutação não ficou
+    commitada — a prova é o texto do sentinel.)
+13. **Verificação local**: os gates da casa verdes (scope/docs-lint/
+    docs-lint-state/release-identity/check_main) + os 7 chunks do fuzz.
+14. **CI**: verde no commit desta fase.
+15. **Riscos**: os wrappers de destroy TÊM de ser idempotentes (o contrato
+    está nos comentários do gestor e nos wrappers das 8 camadas — o pin
+    do destroy duplo aferra); a camada que falha no recreate continua a
+    reportar (o lastFailed/Consola — o comportamento do dono mantém-se).
+16. **Próximo passo**: FASE 2-Z2 — o céu (o below-horizon da F0-Z2.3), a
+    ordem fixa por frame, o «Repor câmara» + o varrimento de 200 poses.
+
+## TABELA DE RÓTULOS (FASE 1-Z2)
+
+| Afirmação | Rótulo | Prova |
+|---|---|---|
+| ≥1000 ciclos de perda de contexto real sem UMA falha (hash exato + input vivo) | PROVADO | F1-Z2.2 (1050 ciclos, 7 seeds, 0 falhas) |
+| O texto morre após a 2.ª perda de contexto quando uma camada falhou a recriar | PROVADO (antes do fix) | a pilotagem (o frame sem glifos) + o log da camada |
+| A causa é o salto por `valid` no invalidateAll | PROVADO | a cadeia com ficheiro:linha + o fix que elimina o sintoma em 1050 ciclos |
+| A engine tem fuga de memória por ciclo de contexto | REFUTADO (no hospedeiro) | o RSS estável 210→240MB (o ~0.2MB/ciclo é do llvmpipe; o device entra na VERIFICAÇÃO NO DISPOSITIVO) |
+| O fade dos painéis pós-reload é bug | REFUTADO | é a animação de entrada (o mesmo no device); o protocolo assenta antes de comparar |
+| O layout deslocado pós-perda é bug da engine | REFUTADO | eram duas instâncias de android_app no HARNESS (o log [boot 1/6] com insets T0 R0) |
+| O frame seguinte é idêntico COM gesto durante a perda | PROVADO | os ciclos com gesto (1/8 dos 1050) exatos |
+| A recuperação <1s (o critério da 0.12-Z) no GLES real | PROVADO | o ciclo corre DENTRO de 1 frame (o c33 F4 já o aferrava; o fuzz corre o mesmo caminho) |

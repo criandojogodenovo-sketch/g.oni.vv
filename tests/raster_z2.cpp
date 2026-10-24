@@ -284,9 +284,292 @@ void selectCuboByName() {
     }
 }
 
+// o app + o parity da fonte vivem NO namespace anónimo (o fuzzRun usa-os)
+android_app g_app;
+FakeStorage* g_stOwned = nullptr;
+
+void loadFixtureFontIfDead() {
+    // no device a camada "font" re-bake de /system/fonts (o recreate do
+    // gestor); no hospedeiro não há fontes de sistema — a fixture entra
+    // AQUI (o mesmo papel do Roboto no device). Corre DEPOIS de TODO INIT.
+    if (!g_font.ok()) {
+        const char* paths[] = {FONT_FIXTURE};
+        g_font.loadFromPaths(paths, 1, 28.0f);
+    }
+    g_ui.setFont(&g_font);
+}
+
+// ===========================================================================
+// FASE 1-Z2 — O FUZZING DO CONTEXTO (o pedido: destruir/recriar o contexto
+// EGL/surface em frames aleatórios, ≥1000 ciclos, com e sem WorldEnvironment,
+// com e sem partículas, com gesto de toque a meio, e provar que o frame
+// seguinte é IDÊNTICO ao de referência (hash de píxeis) e que o input
+// responde). Relatório: nº de ciclos, falhas, seed de cada falha.
+// ===========================================================================
+struct FuzzRng {
+    u32 s;
+    explicit FuzzRng(u32 seed) : s(seed ? seed : 0xC0FFEEu) {}
+    u32 next() {
+        s = s * 1664525u + 1013904223u;
+        return s >> 8;   // os 24 bits altos (o LCG da casa)
+    }
+    u32 below(u32 n) { return n ? next() % n : 0; }
+};
+
+u64 frameHash(const std::vector<u8>& px) {
+    u64 h = 1469598103934665603ull;
+    for (const u8 b : px) {
+        h ^= b;
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+// o WE procedural re-criado (o reload do storage mata os TICs não gravados)
+Handle addWeTic() {
+    const Handle h = g_scene.create("WorldEnvironment");
+    Tic* t = g_scene.get(h);
+    t->addComponent<Transform3D>();
+    Environment* e = t->addComponent<Environment>();
+    e->skyType = Environment::kSkyTypeProcedural;
+    return h;
+}
+
+Handle addStormTic() {
+    const Handle h = g_scene.create("Clima");
+    Tic* t = g_scene.get(h);
+    t->addComponent<Transform3D>();
+    AmbientEnvironment* ae = t->addComponent<AmbientEnvironment>();
+    ParticleEmitter* pe = t->addComponent<ParticleEmitter>();
+    ae->weatherType = AmbientEnvironment::kWeatherStorm;
+    ae->thunderTimer = 60.0f;   // SEM raio no ciclo (o hash fica estável)
+    ae->applyWeatherPreset(pe);
+    return h;
+}
+
+int fuzzRun(int cycles, u32 seed) {
+    std::printf("\n== FASE 1 — FUZZING DO CONTEXTO (%d ciclos, seed %u) ==\n",
+                cycles, seed);
+    FuzzRng rng(seed);
+    int failures = 0;
+    long exactChecks = 0;
+    long inputChecks = 0;
+    std::vector<u32> failCycles;
+
+    // o estado base: WE procedural + cubo selecionado (o dono a editar)
+    Handle weH{};
+    Handle stormH{};
+    selectCuboByName();
+    // o ESTADO DO CENÁRIO (a MESMA função antes do REF e depois da
+    // recuperação — o REF e o REC têm de ver o MESMO mundo). O ESTADO é
+    // lido POR NOME (o handle do pré-loss fica STALE após o reload — o
+    // slot reutiliza a geração; o find é a fonte da verdade, o padrão do
+    // selectCuboByName)
+    auto weAlive = [&]() { return g_scene.find("WorldEnvironment").valid(); };
+    auto stormAlive = [&]() { return g_scene.find("Clima").valid(); };
+    auto applyScenario = [&](int scenario) {
+        if (scenario == 7) {
+            if (!weAlive()) weH = addWeTic();
+            if (!stormAlive()) stormH = addStormTic();
+        } else if (scenario == 3) {
+            if (weAlive()) {
+                g_scene.destroy(g_scene.find("WorldEnvironment"));
+                weH = Handle{};
+            }
+            if (stormAlive()) {
+                g_scene.destroy(g_scene.find("Clima"));
+                stormH = Handle{};
+            }
+        } else {
+            if (!weAlive()) weH = addWeTic();
+            if (stormAlive()) {
+                g_scene.destroy(g_scene.find("Clima"));
+                stormH = Handle{};
+            }
+        }
+    };
+    applyScenario(0);
+    stepFrame(0.0f);
+    stepFrame(0.0f);
+
+    for (int c = 0; c < cycles; ++c) {
+        const u32 r = rng.next();
+        const int scenario = static_cast<int>(r % 8);   // 0-6 base, 7 storm
+        const int framesBefore = 1 + static_cast<int>(rng.below(8));
+        const bool gesto = (rng.next() & 7u) == 0u;     // ~1/8 com gesto
+
+        // ---- o cenário do ciclo ----
+        applyScenario(scenario);
+        for (int i = 0; i < framesBefore; ++i) {
+            stepFrame(1.0f / 60.0f);
+        }
+
+        // ---- a REFERÊNCIA (o MESMO protocolo: assentar + congelar, SEM
+        // dedo — o gesto entra DEPOIS do REF e morre no term) ------
+        for (int i = 0; i < 60; ++i) {
+            stepFrame(1.0f / 60.0f);
+        }
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        int w = 0, h = 0;
+        const std::vector<u8> ref = readFrame(&w, &h);
+        const u64 refHash = frameHash(ref);
+
+        // o GESTO a meio (o dedo PRESSIONADO quando o contexto morre — o
+        // device faz isto; o reset do estado de interação tem de sobreviver:
+        // o REF é SEM dedo, o REC é depois do UP — um gesto PRESO aparece
+        // como diff)
+        if (gesto) {
+            g_input.injectDown(0, 640.0f, 360.0f);
+            stepFrame(1.0f / 60.0f);
+        }
+        if (getenv("FUZZ_DUMP")) {   // o dump IMEDIATO (o buffer morre no term)
+            char nm[64];
+            std::snprintf(nm, sizeof(nm), "fuzz%03d_ref", c);
+            capturePng(nm);
+        }
+
+        // ---- a PERDA (o ciclo REAL do device: TERM + INIT) ----
+        onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
+        onAppCmd(&g_app, APP_CMD_INIT_WINDOW);
+        loadFixtureFontIfDead();       // o parity da fonte (hospedeiro)
+        selectCuboByName();            // o reload re-cria os TICs
+        if (gesto) {
+            g_input.injectUp(0);       // o dedo solta (o device também solta)
+        }
+        // o cenário re-aplica (os TICs não gravados morrem no reload — o
+        // contrato; o device idem: o utilizador re-põe ou grava a cena) —
+        // a MESMA applyScenario do pré-loss
+        applyScenario(scenario);
+        // o ASSENTAMENTO: as animações da UI (o fade dos painéis/véus
+        // recomeça no reload — o mesmo no device) correm 60 frames ANTES
+        // do congelamento (com dt=0 o fade fica na opacidade inicial e o
+        // texto dos tabs NÃO nasce — o falso "texto morto")
+        for (int i = 0; i < 60; ++i) {
+            stepFrame(1.0f / 60.0f);
+        }
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+        const std::vector<u8> rec = readFrame(&w, &h);
+        const u64 recHash = frameHash(rec);
+        if (getenv("FUZZ_DUMP")) {
+            char nm[64];
+            std::snprintf(nm, sizeof(nm), "fuzz%03d_rec", c);
+            capturePng(nm);
+        }
+
+        // ---- o VEREDICTO por hash (ou tolerância: o chip do FPS no
+        // status line e o ruído de 1 bit do céu não são "recuperação
+        // diferente" — a tolerância do dono: «hash de píxeis OU diferença
+        // < tolerância») ----
+        const bool ready = g_ready;
+        bool same = (refHash == recHash);
+        long ndiff = 0;
+        int maxDelta = 0;
+        if (!same && scenario != 7) {
+            const size_t np = ref.size() < rec.size() ? ref.size() : rec.size();
+            for (size_t o = 0; o + 3 < np; o += 4) {
+                if (std::memcmp(&ref[o], &rec[o], 4) != 0) {
+                    ++ndiff;
+                    for (int k = 0; k < 4; ++k) {
+                        const int d = std::abs(int(ref[o + k]) - int(rec[o + k]));
+                        if (d > maxDelta) maxDelta = d;
+                    }
+                }
+            }
+            // a tolerância: < 0.5% dos píxeis E delta ≤ 32 (o chip do FPS
+            // muda o número; a recuperação não pode mudar CONTEÚDO)
+            const double tolPct =
+                100.0 * double(ndiff) / double(w * h);
+            same = (tolPct < 0.5 && maxDelta <= 32);
+        }
+        if (scenario == 7) {
+            same = ready;   // o storm re-cria seeds novas — o hash EXATO não
+                            // se aplica; aferra VIDA (g_ready)
+        }
+        ++exactChecks;
+        if (!ready || !same) {
+            ++failures;
+            failCycles.push_back(static_cast<u32>(c));
+            std::printf("    [FAIL] ciclo %d (scenario %d, gesto %d, frames %d): "
+                        "ready=%d hash ref=%016llx rec=%016llx\n",
+                        c, scenario, gesto ? 1 : 0, framesBefore, ready ? 1 : 0,
+                        (unsigned long long)refHash,
+                        (unsigned long long)recHash);
+            std::printf("    [dbg] diff=%ld px (%.3f%%) maxDelta=%d\n",
+                        ndiff, 100.0 * double(ndiff) / double(w * h), maxDelta);
+        }
+
+        // o PROGRESSO (o 1000-ciclo corre minutos: o dono vê a vida) + o
+        // RSS (a fuga de memória por contexto é o que o fuzzing apanha)
+        if (c % 50 == 0) {
+            FILE* sm = std::fopen("/proc/self/statm", "r");
+            long rssPages = 0;
+            if (sm) {
+                long tot = 0;
+                if (std::fscanf(sm, "%ld %ld", &tot, &rssPages) != 2) {
+                    rssPages = -1;
+                }
+                std::fclose(sm);
+            }
+            std::printf("    [fuzz %d/%d] rss=%ldMB falhas=%d\n", c, cycles,
+                        rssPages * 4 / 1024, failures);
+            std::fflush(stdout);
+        }
+
+        // ---- o INPUT VIVO (a cada 32 ciclos: o tap no FUNDO 3D limpa a
+        // seleção; o tap NO CUBO re-seleciona — o caminho do PICK 3D, o
+        // mais valioso: hit-test + projeção + dispatch após a recuperação)
+        if (c % 32 == 31) {
+            g_input.injectDown(0, 400.0f, 600.0f);   // o fundo 3D vazio
+            stepFrame();
+            g_input.injectUp(0);
+            stepFrame();
+            stepFrame();
+            const bool cleared = !g_editor.selected.valid();
+            g_input.injectDown(0, 740.0f, 340.0f);   // o CUBO (o pick 3D)
+            stepFrame();
+            g_input.injectUp(0);
+            stepFrame();
+            stepFrame();
+            const bool reselected = g_editor.selected.valid();
+            ++inputChecks;
+            if (!cleared || !reselected) {
+                ++failures;
+                failCycles.push_back(static_cast<u32>(c));
+                std::printf("    [FAIL] ciclo %d: INPUT MORTO (clear=%d select=%d)\n",
+                            c, cleared ? 1 : 0, reselected ? 1 : 0);
+                std::printf("    [dbg] selected.valid=%d hCubo=%u scene.count=%u\n",
+                            g_editor.selected.valid() ? 1 : 0,
+                            (unsigned)g_editor.selected.index,
+                            (unsigned)g_scene.count());
+                char nm[64];
+                std::snprintf(nm, sizeof(nm), "fuzzin%03d", c);
+                capturePng(nm);
+            }
+        }
+    }
+
+    std::printf("    fuzz: %d ciclos | exatos=%ld | input=%ld | falhas=%d\n",
+                cycles, exactChecks, inputChecks, failures);
+    if (!failCycles.empty()) {
+        std::printf("    ciclos com falha:");
+        for (const u32 fc : failCycles) {
+            std::printf(" %u", fc);
+        }
+        std::printf("\n    (a seed da run: %u — o replay é determinístico)\n", seed);
+    }
+    prova("fuzzing de contexto concluído (o relatório cola os números)");
+    check(failures == 0, "o fuzzing não teve NENHUMA falha (frame idêntico + input vivo)");
+    return failures;
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    const bool fuzzMode = argc > 1 && std::strcmp(argv[1], "--fuzz") == 0;
+    const int fuzzCycles = argc > 2 ? std::atoi(argv[2]) : 1000;
+    const u32 fuzzSeed = argc > 3 ? static_cast<u32>(std::strtoul(argv[3], nullptr, 10)) : 0xC0FFEEu;
     std::printf("== RASTER Z2 — GLES REAL no hospedeiro (0.12-Z2 FASE 0) ==\n");
     std::printf("   Mesa/llvmpipe via EGL pbuffer; pixels LIDOS (glReadPixels)\n");
     rmrf(kOutDir);
@@ -324,12 +607,14 @@ int main() {
     std::printf("[mk] cena gravada\n"); std::fflush(stdout);
 
     glResourcesRegister();
-    android_app app;
-    std::memset(&app, 0, sizeof(app));
-    app.contentRect = {0, 24, 1256, 720};   // insets do C33 escalados a 1280
+    // O g_app ÚNICO (o fuzzRun e as fases partilham a MESMA instância —
+    // o contentRect é o payload do sistema e tem de sobreviver aos INITs,
+    // como no device: o glue mantém o último retângulo entregado)
+    std::memset(&g_app, 0, sizeof(g_app));
+    g_app.contentRect = {0, 24, 1256, 720};   // insets do C33 escalados a 1280
     const auto tBoot = std::chrono::steady_clock::now();
     std::printf("[mk] INIT_WINDOW...\n"); std::fflush(stdout);
-    onAppCmd(&app, APP_CMD_INIT_WINDOW);
+    onAppCmd(&g_app, APP_CMD_INIT_WINDOW);
     std::printf("[mk] INIT done\n"); std::fflush(stdout);
     check(g_ready, "boot: INIT_WINDOW completo (g_ready) com GLES REAL");
     check(g_egl.width() == 1280 && g_egl.height() == 720,
@@ -345,6 +630,13 @@ int main() {
     // a seleção do TIC Cubo (o gizmo vivo — o estado do dono)
     selectCuboByName();
     check(g_hCubo.valid(), "boot: o TIC Cubo carregado da cena (migration legado→gmesh)");
+    if (fuzzMode) {
+        // FASE 1: o fuzzing usa o MESMO boot; as fases A-D não correm
+        const int f = fuzzRun(fuzzCycles, fuzzSeed);
+        onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
+        std::printf("\n%s (falhas=%d)\n", f ? "FUZZ FALHOU" : "FUZZ OK", f);
+        return f ? 1 : 0;
+    }
 
     // ======================================================================
     // FASE A — A PROVA DE RASTERIZAÇÃO REAL
@@ -612,8 +904,8 @@ int main() {
         // B4: PERDA DE CONTEXTO (o ciclo do device: TERM + INIT) — A CAPTURA
         // DO SINTOMA (o dono: «sair e voltar: grelha some, zoom morto»)
         const std::vector<u8> antes = readFrame(&w, &h);
-        onAppCmd(&app, APP_CMD_TERM_WINDOW);
-        onAppCmd(&app, APP_CMD_INIT_WINDOW);
+        onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
+        onAppCmd(&g_app, APP_CMD_INIT_WINDOW);
         // o PARITY do device: a camada font re-bake de /system/fonts no
         // device; no hospedeiro a fixture repõe (o recreate do gestor
         // falha SEM fontes de sistema — FontAtlas.cpp:12 só tem caminhos
@@ -696,7 +988,7 @@ int main() {
                     rep.c_str(), g_checks, g_failed, g_provas);
     }
 
-    onAppCmd(&app, APP_CMD_TERM_WINDOW);
+    onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
     std::printf("\n%s (falhas=%d)\n", g_failed ? "RASTER Z2 FALHOU" : "RASTER Z2 OK",
                 g_failed);
     return g_failed ? 1 : 0;

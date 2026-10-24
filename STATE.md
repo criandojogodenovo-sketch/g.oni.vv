@@ -1,7 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-24 · vc: 130 · Último commit: este (a 0.12-Z2 F0 —
-o ambiente de prova com GLES REAL; o RELATORIO-0.12-Z2-RASTER.md);
+Atualizado: 2026-10-24 · vc: 131 · Último commit: este (a 0.12-Z2 F1 —
+o fuzzing do contexto no GLES REAL + o R-070; o RELATORIO-0.12-Z2-RASTER.md
+§F1);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -10,49 +11,27 @@ o ambiente de prova com GLES REAL; o RELATORIO-0.12-Z2-RASTER.md);
 ## §1 Onde estamos
 
 - **Campanha 0.12-Z2 (CONTEXTO GL + WE + CLIMA + AUDITORIA TOTAL) — F0
-  FECHADA (vc 130)**. O raster_z2: a engine contra o DRIVER GLES REAL
-  (Mesa/llvmpipe 25.0.7, ES 3.2) no hospedeiro via EGL pbuffer (o shim
-  eglCreateWindowSurface→pbuffer é o ÚNICO desvio do header canónico).
-  A grelha/o céu/o cubo/o gizmo/a UI PROVADOS em PIXELS (27 checks/0
-  falhas; fwidth corre). Os 4 sintomas com captura ANTES: (a) a «zona
-  azul/escura que corta a grelha» LOCALIZADA — o FS do céu pinta o
-  meio-plano INFERIOR com uHorizon (SkyRenderer.cpp `clamp(dir.y,0,1)`;
-  a FASE 2 dá o tom de chão); (b) B1/B2 provam que a zona vem do passe
-  do céu; (c) a pose extrema rasteriza; (d) a perda TERM/INIT REAL
-  recupera grelha+texto+cena no caminho FIEL ao device (2 falsos
-  positivos REFUTADOS como artefactos do hospedeiro: FontAtlas.cpp:12
-  só tem caminhos Android; o contrato meshPath+reload main.cpp:4099/
-  5778/5793). A bisseção por passe aferrada (7 passes vivos, diffs por
-  pixel). O flash do STORM acende e morre (452205 px pico→morto — nunca
-  persistente). O relógio do motor precisa do g_frameDt (o harness
-  alimenta com dt fixo 1/60 — determinismo para as golden images).
-  ZERO linhas de produto tocadas; o raster_z2 NÃO entra no ctest.
-
-- **Campanha 0.12-Z (ANTI-PERDA DE CONTEXTO OPENGL + A SOMBRA) — F0..F4
-  FECHADAS (vc 125..129)**. **F4 (vc 129)**: o botão «Simular
-  perda» (debug-only; 1 frame de sonda morta — a recuperação REAL corre,
-  zero atalho) + os 20 CENÁRIOS no c33 (10 SEM WE + 10 COM WE: boot/
-  TERM+INIT/RESIZED/tabs/painel/PAUSE+RESUME/foco/perda). O critério
-  «recupera em <1 s» provado (1 frame). c33 1113/0. pin
-  simulate_loss_recupera + R-069 + M-Z8. **F3 (vc 128)**: a sonda por
-  frame (2 EGL + glIsProgram/glIsTexture + o glGetError em série, limiar
-  30), a recuperação PELO GESTOR da F1 (+ o reset da interação, a câmara
-  sã, o cooldown de 30 na falha), os resets no PAUSE/LOST_FOCUS, o chip
-  «GL: OK/RECRIADO n» e o botão «Reiniciar renderer». pin
-  context_recovery_ciclo + R-068 + M-Z6/M-Z7. **F2 (vc 127)**: a CAUSA
-  RAIZ da sombra (o fogDensity NaN PASSAVA pela clamp e envenenava a
-  exp2 do lit FS — §F2.1); a cura na FONTE (Environment::sane), a névoa
-  em highp, a grelha EXPLÍCITA, o depth func reposto. pin env_sana_nan +
-  R-067 + M-Z5. **F1 (vc 126)**: render/GlResources.h NOVO — o
-  GLResourceManager (a FONTE ÚNICA da recriação; o ACHADO: o
-  g_particles.destroy() FALTAVA na lista manual do term); as 8 camadas;
-  cameraEnsureSane() + editorRecalcHitCaches(). pins ×2 + R-066 +
-  M-Z3/M-Z4. **F0 (vc 125)**: render/GlDebug.h NOVO (Masks + contadores
-  + PassState + os 11 toggles nas Definições), os gates POR PASSE, o
-  inventário GL no boot, os timestamps no ciclo de vida; o §F0.3 fecha
-  as 4 candidatas da sombra e o §F0.4 analisa o clima «não funciona»
-  (presets sub-pixel ~1.3 px a 720p, contexto perdido, g_fxTime, origem,
-  NONE). 0 FBOs. pins ×4 + R-065.
+  (vc 130) e F1 (vc 131) FECHADAS**. **F1**: o --fuzz no raster_z2 —
+  1050 ciclos de perda REAL (7 seeds ×150) com cenários (WE on/off,
+  storm, gesto) — o frame seguinte EXATO (hash FNV) em TODOS + o input
+  vivo (28 checks: o pick do cubo re-seleciona). O ACHADO **R-070** (o
+  fix de produto): o invalidateAll saltava a camada cujo recreate falhou
+  (`if (!l.valid) continue`) → o handle morto sobrevivia (o guard tex_ do
+  FontAtlas "recriava" com id morto = o TEXTO MORTO após sair e voltar;
+  a mono no OEM enxuto falha SEMPRE) — o invalidate corre SEMPRE
+  (idempotente). pin do term duplo (inv0+6) + sentinela
+  regress_glctx_z2_fase1 + REGRESSOES.md. test_core 0 · c33 1113/0.
+  **F0 (vc 130)**: o raster_z2 — a engine contra o DRIVER GLES REAL
+  (Mesa/llvmpipe 25.0.7, ES 3.2, EGL pbuffer; o shim é o ÚNICO desvio do
+  header canónico). A grelha/o céu/o cubo/o gizmo/a UI PROVADOS em
+  PIXELS (27 checks/0; fwidth corre). Os 4 sintomas com captura ANTES:
+  (a) a «zona azul/escura» LOCALIZADA — o FS do céu pinta o meio-plano
+  inferior com uHorizon (SkyRenderer.cpp `clamp(dir.y,0,1)`; a FASE 2 dá
+  o tom de chão); (d) a perda TERM/INIT REAL recupera no caminho FIEL ao
+  device (2 falsos positivos REFUTADOS como artefactos do hospedeiro).
+  Bisseção por passe aferrada (7 vivos). O flash do STORM acende e morre
+  (nunca persistente). ZERO linhas de produto; o raster_z2 NÃO entra no
+  ctest.
 
 - **Campanha 0.12-Y-F2 (O CLIMA E O VENTO) — FECHADA no código
   (vc 124; a história no RELATORIO-0.12-Y-F2-WEATHER.md)** (a cláusula

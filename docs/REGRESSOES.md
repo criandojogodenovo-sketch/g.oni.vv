@@ -1041,3 +1041,16 @@ Prova de mutação (mutacao-R030a-vermelho.txt): `0x2196F3` (o azul órfão da s
 | Teste sentinela | `regress_glctx_fase4` (tests/test_sentinels.cpp): o flag + o despacho + o botão debug-only + os cenários com os eventos do lifecycle. Os irmãos: simulate_loss_recupera (tests/test_012z_ctx.cpp — o ciclo real no host) + os 20 cenários no c33_virtual (1113 checks, era 1008) |
 | Prova de mutação | **M-Z8** (a simulação por atalho — o flag a "recuperar" direto sem correr o contextRecover): simulate_loss_recupera VERMELHO («a perda simulada não recuperou») — o atalho não passa pela fonte única; reposto, VERDE |
 | Padrão proibido | «a simulação por atalho (o flag arma a sonda — o ciclo REAL corre; um caminho que "recupera" sem passar pelo contextRecover é o falso verde)»; «o botão de debug visível sem o mestre (a simulação é ferramenta do dono — o mestre manda)»; «os cenários sem o WE (a metade COM WorldEnvironment é do critério do dono)»; «o cenário sem a aferição das camadas (g_ready sozinho não prova — o renderer e a grelha têm de estar VIVOS no gestor)» |
+
+## R-070 · O INVALIDATE CORRE SEMPRE — A CAMADA QUE FALHOU A RECRIAR NÃO CARREIA O HANDLE MORTO (0.12-Z2 F1)
+
+| | |
+|---|---|
+| ID | R-070 |
+| Reportado | a campanha 0.12-Z2 (o prompt do dono: «PROVA POR FUZZING: destruir e recriar o contexto EGL/surface… e provar que o frame seguinte é idêntico ao de referência») — o fuzzing no GLES REAL (raster_z2 --fuzz) apanhou-o no ciclo 1 |
+| Sintoma vigiado | o TEXTO MORTO após sair e voltar (o sintoma do dono no device): a camada cujo recreate FALHOU UMA vez (a font no hospedeiro sem /system/fonts; a font-MONO no OEM enxuto — falha SEMPRE lá) ficava permanentemente inválida no gestor |
+| Causa (ficheiro:linha) | render/GlResources.h invalidateAll: o salto `if (!l.valid) continue` — o term seguinte SALTAVA o destroy da camada inválida e o handle do contexto morto sobrevivia; o guard `if (tex_) return true` do FontAtlas.cpp:117 então "recriava" com o id morto → os glifos amostravam textura morta = UI sem texto (PROVADO no fuzz: o frame pós-recuperação sem NENHUM glifo, os ícones vivos) |
+| Fix | render/GlResources.h: o invalidateAll corre SEMPRE (o invalidate é IDEMPOTENTE por contrato — o destroy de cada camada começa pelo `if (obj != 0)`); a nota do achado no próprio header |
+| Teste sentinela | `regress_glctx_z2_fase1` (tests/test_sentinels.cpp): o salto PROIBIDO no fonte + a nota do achado + o pin do term duplo no contrato novo. O irmão: glresources_ciclo (tests/test_012z_ctx.cpp) atualizado — o term duplo invalida 2× as 3 camadas (inv0+6) e os wrappers aguentam o destroy duplo |
+| Prova de mutação | a mutação (re-pôr o `if (!l.valid) continue`): R-070 VERMELHO («o salto da camada inválida voltou») + o pin inv0+6 VERMELHO + o fuzz recupera o texto morto no ciclo seguinte. Reposto: R-070 VERDE, test_core 0 falhas, c33 1113/0, o fuzz 1050 ciclos/0 falhas |
+| Padrão proibido | «a camada inválida salta o invalidate (o invalidate é idempotente por contrato — saltar é carrear o handle morto para o contexto seguinte)»; «o recreate falhado invalida a camada para sempre (a falha de UMA recriação não pode condenar TODAS as seguintes)» |

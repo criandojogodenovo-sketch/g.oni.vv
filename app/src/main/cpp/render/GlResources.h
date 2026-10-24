@@ -57,12 +57,18 @@ public:
     // Nunca lança nem para — uma camada que falhe ao morrer é logada e o
     // ciclo continua (o próximo recreate recomeça pelo destroy de qualquer
     // forma).
+    // 0.12-Z2 F1 (o ACHADO do fuzzing no GLES REAL — raster_z2 --fuzz): o
+    // salto `if (!l.valid) continue` deixava a camada que FALHOU a recriar
+    // (ex.: a font no OEM enxuto — a mono FALHA SEMPRE lá) PERMANENTEMENTE
+    // inválida: o term seguinte SALTAVA o destroy dela e o handle velho
+    // (tex_ de um contexto MORTO) sobrevivia — o guard `if (tex_)` do
+    // FontAtlas.cpp:117 então "recriava" com o id morto = TEXTO MORTO
+    // depois de sair e voltar (o sintoma do dono no device). O invalidate
+    // é IDEMPOTENTE POR CONTRATO (o destroy de cada camada começa pelo
+    // `if (obj != 0)`) — corre SEMPRE, válido ou não.
     void invalidateAll() {
         for (u32 i = 0; i < count_; ++i) {
             Layer& l = layers_[i];
-            if (!l.valid) {
-                continue;   // já inválida (term duplo, perda em cadeia)
-            }
             if (l.invalidate && !l.invalidate(l.owner)) {
                 elog::warn("glresources: camada %s FALHOU ao invalidar "
                            "(o recreate recomeça pelo destroy)", l.name);

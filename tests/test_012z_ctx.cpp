@@ -438,15 +438,24 @@ TEST(glresources_ciclo) {
         EXPECT_MSG(!g_tC, "0.12-Z F1: a camada c recriou DEPOIS do "
                           "falhar da b (o ciclo devia ter parado)");
 
-        // o term duplo: só o que está VIVO morre — após o recreateAll
-        // falhar na b, SÓ a camada "a" está viva (a 1.ª invalidate mata-a;
-        // a 2.ª é um no-op)
+        // o term duplo (0.12-Z2 F1 — o ACHADO do fuzzing no GLES REAL,
+        // raster_z2 --fuzz): o invalidate corre SEMPRE — inclusive na
+        // camada cujo recreate FALHOU (a mono no OEM enxuto falha SEMPRE).
+        // O salto antigo `if (!l.valid) continue` deixava essa camada
+        // permanentemente inválida: o term seguinte SALTAVA o destroy e o
+        // handle do contexto morto sobrevivia (o guard `if (tex_)` do
+        // FontAtlas "recriava" com id morto = TEXTO MORTO após sair e
+        // voltar — o sintoma do dono). Os wrappers são IDEMPOTENTES (o
+        // 2.º destroy é no-op seguro): o duplo term invalida 2× as 3
+        // camadas e os estados ficam todos mortos.
         const u32 inv0 = m.invalidations();
         m.invalidateAll();
         m.invalidateAll();
-        EXPECT_MSG(m.invalidations() == inv0 + 1,
-                   "0.12-Z F1: o term duplo não é idempotente (%u de 1)",
+        EXPECT_MSG(m.invalidations() == inv0 + 6,
+                   "0.12-Z2 F1: o term duplo invalida SEMPRE (%u de 6)",
                    (unsigned)(m.invalidations() - inv0));
+        EXPECT_MSG(!g_tA && !g_tB && !g_tC,
+                   "0.12-Z2 F1: os wrappers aguentam o destroy duplo");
     }
 
     // ---- as camadas GL do PRODUTO recriam individualmente (o boot em

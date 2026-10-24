@@ -9384,3 +9384,41 @@ TEST(regress_glctx_fase4) {
                    "R-069: a perda simulada saiu dos cenários");
     }
 }
+
+// ---------------------------------------------------------------------------
+// R-070 — regress_glctx_z2_fase1 (0.12-Z2 F1): o INVALIDATE CORRE SEMPRE —
+// o achado do fuzzing no GLES REAL (raster_z2 --fuzz): o salto
+// `if (!l.valid) continue` no invalidateAll deixava a camada cujo recreate
+// FALHOU (a font-mono no OEM enxuto falha SEMPRE) permanentemente inválida
+// — o term seguinte saltava o destroy dela e o handle do contexto morto
+// sobrevivia (o guard `if (tex_)` do FontAtlas "recriava" com id morto =
+// TEXTO MORTO depois de sair e voltar — o sintoma do dono no device).
+// A mutação (re-pôr o salto) tem de ficar VERMELHA aqui.
+// ---------------------------------------------------------------------------
+TEST(regress_glctx_z2_fase1) {
+    std::string src;
+    EXPECT(readFileText(
+        REPO_ROOT "/app/src/main/cpp/render/GlResources.h", src));
+    const std::string code = test::stripCppComments(src);
+    // (1) o salto por `valid` NÃO EXISTE no invalidateAll (o invalidate é
+    //     idempotente por contrato e corre sempre)
+    EXPECT_MSG(code.find("if (!l.valid)") == std::string::npos &&
+                   code.find("continue;   // já inválida") ==
+                       std::string::npos,
+               "R-070: o salto da camada inválida voltou ao invalidateAll "
+               "(o handle morto sobrevive ao contexto seguinte — o texto "
+               "morre após sair e voltar)");
+    // (2) o commentário da 0.12-Z2 F1 está no fonte (a razão da regra —
+    //     lido no fonte CRU: o stripCppComments come os comentários)
+    EXPECT_MSG(src.find("0.12-Z2 F1") != std::string::npos,
+               "R-070: a nota do achado do fuzzing saiu do GlResources.h");
+    // (3) o pin do term duplo aferra o contrato novo (2× as 3 camadas)
+    {
+        std::string pin;
+        EXPECT(readFileText(REPO_ROOT "/tests/test_012z_ctx.cpp", pin));
+        const std::string c = test::stripCppComments(pin);
+        EXPECT_MSG(c.find("inv0 + 6") != std::string::npos,
+                   "R-070: o pin do term duplo voltou ao contrato velho "
+                   "(inv0 + 1 — o salto é o bug)");
+    }
+}
