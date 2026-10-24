@@ -66,6 +66,7 @@
 #include "platform/CrashHandler.h"
 #include "platform/EglContext.h"
 #include "render/GlDebug.h"   // 0.12-Z F0: o diagnóstico do contexto GL
+#include "render/GlResources.h"  // 0.12-Z F1: o GLResourceManager
 #include "platform/FileApi.h"
 #include "platform/InputState.h"
 #include "platform/StorageBridge.h"
@@ -132,6 +133,7 @@ f32         g_skyTime = 0.0f;
 // g_fxTime é o relógio das PARTÍCULAS (frame real — a pausa congela, a
 // MESMA honra do g_skyTime/sdf::g_time).
 ParticleRenderer g_particles;
+
 f32              g_fxTime = 0.0f;
 
 // ---- F3: editor ------------------------------------------------------------
@@ -946,6 +948,147 @@ static void impostorQuadEnsure() {
                          static_cast<u32>(md.indices.size()));
     }
 }
+
+// ---- 0.12-Z F1 — O GLResourceManager: AS CAMADAS (a FONTE ÚNICA da
+// lista de invalidação/recriação — a mesma ordem da 0.6.7). Os wrappers
+// estáticos existem porque o registo leva PONTEIROS DE FUNÇÃO puros.
+static bool layerInvalidateFont(void*) {
+    g_font.destroy();
+    return true;
+}
+static bool layerRecreateFont(void*) {
+    if (!g_font.loadFromPaths(kSystemFontPaths, kSystemFontPathCount,
+                              28.0f)) {
+        return false;
+    }
+    g_ui.setFont(&g_font);
+    return true;
+}
+static bool layerInvalidateFontMono(void*) {
+    g_fontMono.destroy();
+    return true;
+}
+static bool layerRecreateFontMono(void*) {
+    if (!g_fontMono.loadFromPaths(kMonoFontPaths, kMonoFontPathCount,
+                                  28.0f)) {
+        return false;   // o mono é OPCIONAL no device — o boot loga e segue
+    }
+    g_ui.setMonoFont(&g_fontMono);
+    return true;
+}
+static bool layerInvalidateCube(void*) {
+    g_cubeMesh.destroy();
+    return true;
+}
+static bool layerRecreateCube(void*) {
+    const CubeMeshData cube = makeCube(1.0f);
+    return g_cubeMesh.create(cube.vertices.data(),
+                             static_cast<u32>(cube.vertices.size()),
+                             cube.indices.data(),
+                             static_cast<u32>(cube.indices.size()));
+}
+static bool layerInvalidateImpQuad(void*) {
+    g_impQuad.destroy();
+    return true;
+}
+static bool layerRecreateImpQuad(void*) {
+    impostorQuadEnsure();
+    return g_impQuad.ok();
+}
+static bool layerInvalidateRenderer(void*) {
+    g_renderer.shutdown();
+    return true;
+}
+static bool layerRecreateRenderer(void*) {
+    return g_renderer.init();
+}
+static bool layerInvalidateGrid(void*) {
+    g_grid.destroy();
+    return true;
+}
+static bool layerRecreateGrid(void*) {
+    return g_grid.init();
+}
+static bool layerInvalidateSky(void*) {
+    g_sky.destroy();
+    return true;
+}
+static bool layerRecreateSky(void*) {
+    return g_sky.init();
+}
+static bool layerInvalidateParticles(void*) {
+    g_particles.destroy();
+    return true;
+}
+static bool layerRecreateParticles(void*) {
+    return g_particles.init();
+}
+GLResourceManager g_glResources;   // o registo corre UMA vez no arranque
+
+// 0.12-Z F1: o REGISTO das camadas (a ORDEM da 0.6.7 — o term corre
+// nesta ordem com o contexto AINDA corrente; a partícula que FALTAVA na
+// lista manual entra na sua posição — entre o sky e o renderer)
+void glResourcesRegister() {
+    static bool done = false;
+    if (done) {
+        return;
+    }
+    done = true;
+    g_glResources.registerLayer("font", nullptr, layerInvalidateFont,
+                                layerRecreateFont);
+    g_glResources.registerLayer("font-mono", nullptr,
+                                layerInvalidateFontMono,
+                                layerRecreateFontMono);
+    g_glResources.registerLayer("gpu-cube", nullptr, layerInvalidateCube,
+                                layerRecreateCube);
+    g_glResources.registerLayer("gpu-imp-quad", nullptr,
+                                layerInvalidateImpQuad,
+                                layerRecreateImpQuad);
+    g_glResources.registerLayer("grid", nullptr, layerInvalidateGrid,
+                                layerRecreateGrid);
+    g_glResources.registerLayer("sky", nullptr, layerInvalidateSky,
+                                layerRecreateSky);
+    g_glResources.registerLayer("particles", nullptr,
+                                layerInvalidateParticles,
+                                layerRecreateParticles);
+    g_glResources.registerLayer("renderer", nullptr,
+                                layerInvalidateRenderer,
+                                layerRecreateRenderer);
+    elog::info("glresources: %u camadas registadas (a recriação do "
+               "contexto tem DONO)",
+               static_cast<unsigned>(g_glResources.count()));
+}
+
+// 0.12-Z F1 — A CÂMARA SÃ (o dono: após cada resume/resize validar a
+// câmara — sem NaN, distância nos limites; se inválida, repor o padrão
+// SEM apagar a cena). O zoomBy/pan/orbit do input podem ter deixado o
+// estado degenerado num term a meio do gesto; o resume SANA.
+void cameraEnsureSane() {
+    const bool bad = !std::isfinite(g_camera.target.x) ||
+                     !std::isfinite(g_camera.target.y) ||
+                     !std::isfinite(g_camera.target.z) ||
+                     !std::isfinite(g_camera.yaw) ||
+                     !std::isfinite(g_camera.pitch) ||
+                     !std::isfinite(g_camera.dist) ||
+                     !std::isfinite(g_camera.fovY) || g_camera.dist <= 0.0f ||
+                     g_camera.fovY <= 0.05f || g_camera.fovY >= 3.0f;
+    if (!bad) {
+        // sã: SÓ os clamps de sempre (o float degenerado não passa daqui)
+        g_camera.pitch = g_camera.pitchClamped(g_camera.pitch);
+        g_camera.dist = g_camera.distClamped(g_camera.dist);
+        return;
+    }
+    elog::warn("camera: estado inválido (NaN/fora dos limites) detetado "
+               "no lifecycle — a câmara repõe o PADRÃO (a cena fica)");
+    const Camera fresh;
+    g_camera.target = fresh.target;
+    g_camera.yaw = fresh.yaw;
+    g_camera.pitch = fresh.pitch;
+    g_camera.dist = fresh.dist;
+    g_camera.fovY = fresh.fovY;
+    g_camera.setClips(Camera::kDefaultNear, Camera::kDefaultFar);
+}
+
 
 // os 6 planos do VP do frame (a MESMA fonte do render por blocos) —
 // escritos no frame() depois do vp e consumidos PELO AnimationSystem no
@@ -5329,6 +5472,18 @@ struct LookTrack {
 LookTrack g_lookTrack[kMaxPointerSlots];   // o acumulador (g_lookDx/Dy)
                                            // vive junto ao voniInstallHooks
 
+// 0.12-Z F1 — O RESET DOS CACHES DE HIT-TEST (o retângulo da viewport e o
+// estado do gizmo recalculam no resume/resize — os caches de ecrã velhos
+// apontavam janelas que já não existem)
+void editorRecalcHitCaches() {
+    g_gizmo = gizmo::GizmoState{};
+    g_grab = gizmo::Grab{};
+    g_gizmoBeforeValid = false;
+    for (int s = 0; s < static_cast<int>(kMaxPointerSlots); ++s) {
+        g_lookTrack[s] = LookTrack{};
+    }
+}
+
 u32 feedTouchControls(f32 w, f32 h, bool& outDrawn, TouchControls** outTc) {
     u32 claimed = 0;
     outDrawn = false;
@@ -5413,7 +5568,8 @@ void onAppCmd(android_app* app, i32 cmd) {
             // 0.6.7: após TERM_WINDOW o atlas está destruído (tex_ == 0) →
             // isto é um RE-BAKE + RE-UPLOAD no contexto novo. O guard do
             // loadFromPaths só evita o upload duplicado no MESMO contexto.
-            if (!g_font.loadFromPaths(kSystemFontPaths, kSystemFontPathCount, 28.0f)) {
+            // 0.12-Z F1: a fonte recria PELO GESTOR (a camada "font")
+            if (!g_glResources.recreateLayer("font")) {
                 elog::error("[boot 3/6] fonts FALHOU — nenhuma fonte do sistema — UI sem texto");
             } else {
                 elog::info("[boot 3/6] fonts OK (sistema, 28px)%s",
@@ -5426,8 +5582,9 @@ void onAppCmd(android_app* app, i32 cmd) {
             // FASE UI H: o 2.º ATLAS — o MONO do código (o editor de
             // script). Falhou (OEM enxuto/hospedeiro)? O monoMode cai para
             // o sans de sempre — o editor NUNCA fica sem texto.
-            if (g_fontMono.loadFromPaths(kMonoFontPaths, kMonoFontPathCount,
-                                         28.0f)) {
+            // 0.12-Z F1: PELO GESTOR (a camada "font-mono"; a falha é
+            // ACEITÁVEL — o mono cai para o sans de sempre)
+            if (g_glResources.recreateLayer("font-mono")) {
                 elog::info("[boot 3/6] font MONO OK (o código do editor em "
                            "mono)");
             } else {
@@ -5441,28 +5598,39 @@ void onAppCmd(android_app* app, i32 cmd) {
                 std::string warn;
                 return g_gpu.texture(ref, &warn);
             });
-            // F3: geometria procedural do viewport (mesh partilhado dos presets)
+            // F3: geometria procedural do viewport — 0.12-Z F1: TODAS as
+            // camadas recriam PELO GESTOR (a camada "renderer" por ÚLTIMO,
+            // a ordem do registo; o falhar de uma camada degrada e AVISA —
+            // nunca morre silenciosamente)
             {
-                const CubeMeshData cube = makeCube(1.0f);
-                if (!g_cubeMesh.create(cube.vertices.data(),
-                                       static_cast<u32>(cube.vertices.size()),
-                                       cube.indices.data(),
-                                       static_cast<u32>(cube.indices.size()))) {
-                    elog::error("[boot 4/6] renderer FALHOU no passo: mesh do cubo");
+                struct BootLayer {
+                    const char* name;
+                    const char* step;
+                };
+                const BootLayer bootLayers[] = {
+                    {"gpu-cube", "mesh do cubo"},
+                    {"grid", "grid de chão"},
+                    {"sky", "céu procedural"},
+                    {"particles", "partículas GPU"},
+                    {"renderer", "shaders/materiais"},
+                };
+                bool rendererOk = false;
+                for (const BootLayer& bl : bootLayers) {
+                    if (!g_glResources.recreateLayer(bl.name)) {
+                        elog::error("[boot 4/6] renderer FALHOU no passo: %s",
+                                    bl.step);
+                        continue;
+                    }
+                    if (std::strcmp(bl.name, "renderer") == 0) {
+                        rendererOk = true;
+                    }
                 }
-                if (!g_grid.init()) {
-                    elog::error("[boot 4/6] renderer FALHOU no passo: grid de chão");
+                if (!rendererOk) {
+                    // o renderer é OBRIGATÓRIO — sem ele não há frame (o
+                    // comportamento de SEMPRE: o boot para aqui, sem
+                    // g_ready — a janela tenta de novo no próximo INIT)
+                    break;
                 }
-                if (!g_sky.init()) {
-                    elog::error("[boot 4/6] renderer FALHOU no passo: céu procedural");
-                }
-                if (!g_particles.init()) {
-                    elog::error("[boot 4/6] renderer FALHOU no passo: partículas GPU");
-                }
-            }
-            if (!g_renderer.init()) {
-                elog::error("[boot 4/6] renderer FALHOU (shaders/materiais)");
-                break;
             }
             // F5-E: caches de assets ligados ao storage do projeto (F5.2:
             // app-private — o SAF router foi removido)
@@ -5582,6 +5750,8 @@ void onAppCmd(android_app* app, i32 cmd) {
                 gldbg::summaryLine(inv, sizeof(inv));
                 elog::info("lifecycle: recursos GL do processo: %s", inv);
             }
+            cameraEnsureSane();       // 0.12-Z F1: a câmara SÃ no boot
+            editorRecalcHitCaches();  // 0.12-Z F1: os caches de ecrã frescos
             elog::info("boot: janela pronta %dx%d", (int)g_egl.width(), (int)g_egl.height());
             break;
         }
@@ -5589,6 +5759,8 @@ void onAppCmd(android_app* app, i32 cmd) {
         case APP_CMD_CONFIG_CHANGED:
             g_egl.refreshSize();
             g_renderer.resize(g_egl.width(), g_egl.height());
+            cameraEnsureSane();       // 0.12-Z F1: a câmara SÃ no resize
+            editorRecalcHitCaches();  // 0.12-Z F1: o rect/hit-test frescos
             applyContentRect(app);   // F4.2: barras podem ter mudado
             break;
         case APP_CMD_CONTENT_RECT_CHANGED:
@@ -5613,6 +5785,12 @@ void onAppCmd(android_app* app, i32 cmd) {
             }
             break;
         case APP_CMD_RESUME: {
+            // 0.12-Z F1: a CÂMARA SÃ + os caches de hit-test FRESCOS no
+            // resume (o gesto a meio de um term não sobrevive — o dono:
+            // «validar a câmara; se inválida, repor a padrão sem apagar
+            // a cena»)
+            cameraEnsureSane();
+            editorRecalcHitCaches();
             // F5.5 — All Files Access: RE-VERIFICAÇÃO NO RETORNO (o
             // "re-verificar no onResume" do fluxo). O caminho normal do
             // retorno das definições é o onActivityResult (o Java corre-o
@@ -5683,14 +5861,12 @@ void onAppCmd(android_app* app, i32 cmd) {
                 const u32 gpuMeshes = g_gpu.meshCount();
                 const u32 gpuTextures = g_gpu.textureCount();
                 g_gpu.releaseAll();          // unique_ptr → ~Mesh/~Texture → glDelete*
-                g_font.destroy();            // atlas: glDeleteTextures + reset das métricas
-                g_fontMono.destroy();        // FASE UI H: o mono também (o MESMO ciclo)
-                g_cubeMesh.destroy();
-                g_impQuad.destroy();         // 0.11-W (3.75b): o quad do impostor
+                // 0.12-Z F1: o GESTOR manda — as camadas pela ORDEM da
+                // 0.6.7 (font, font-mono, cube, imp-quad, grid, sky,
+                // particles — a partícula FALTAVA na lista manual —,
+                // renderer), tudo com o contexto AINDA corrente
+                g_glResources.invalidateAll();
                 primMeshesDestroyAll();      // 0.8.10: prims SEM cache (posse)
-                g_grid.destroy();
-                g_sky.destroy();             // 0.12-Y (3.Y-D): o céu procedural
-                g_renderer.shutdown();      // programa UI + VAO/VBO + whiteTex + lit
                 if (g_audioOut) {           // 0.8.11: áudio sai com o contexto
                     g_audioOut->stop();
                     g_audioBackendReady = false;
@@ -9321,6 +9497,7 @@ void frame() {
 
 void android_main(android_app* app) {
     g_bootTime = nowSeconds();   // 0.12-Z F0: os timestamps de lifecycle
+    glResourcesRegister();       // 0.12-Z F1: as camadas do gestor, UMA vez
     // F5.1-hotfix: log DUPLO (logcat + ficheiro) desde a 1ª linha.
     // O boot ainda não tem os paths da activity? O elog usa o fallback
     // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu

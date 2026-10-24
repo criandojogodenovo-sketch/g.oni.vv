@@ -21,6 +21,7 @@
 #include <unistd.h>
 
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -104,6 +105,8 @@ void resetCtxTest() {
 }
 
 void bootEditor() {
+    glResourcesRegister();   // 0.12-Z F1: o registo é do android_main — o
+                             // hospedeiro regista à mão (idempotente)
     android_app app;
     std::memset(&app, 0, sizeof(app));
     onAppCmd(&app, APP_CMD_INIT_WINDOW);
@@ -379,4 +382,122 @@ TEST(gldebug_pass_state) {
     gldbg::checkErrors("pin");
     gldbg::g_errorLog = false;
     EXPECT(true);
+}
+
+// ---------------------------------------------------------------------------
+// 5. O GLRESOURCEMANAGER (0.12-Z F1): o registo na ORDEM da 0.6.7, o
+// invalidateAll marca tudo inválido, o recreateAll repõe (e REPORTA a
+// camada que falha — o lastFailed é o contrato), o recreateLayer
+// individual serve o boot em passos.
+// ---------------------------------------------------------------------------
+// as camadas de TESTE do gestor (a ordem e a falha sob CONTROLO — o
+// ambiente do hospedeiro tem fontes de sistema e não é determinístico)
+namespace {
+bool g_tA = false, g_tB = false, g_tC = false;   // os estados "vivos"
+bool tInv(void* p) { *static_cast<bool*>(p) = false; return true; }
+bool tRec(void* p) { *static_cast<bool*>(p) = true; return true; }
+bool tRecFail(void*) { return false; }
+} // namespace
+
+TEST(glresources_ciclo) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetCtxTest();
+    glstub::fb::enabled = false;
+    javaRegistersGranted();
+    bootEditor();
+
+    // o arranque registou as 8 camadas do produto
+    EXPECT_MSG(g_glResources.count() == 8,
+               "0.12-Z F1: o gestor tem %u camadas (esperado 8)",
+               (unsigned)g_glResources.count());
+
+    // ---- o CICLO com camadas de TESTE (a ordem + a falha sob controlo) --
+    {
+        GLResourceManager m;
+        m.registerLayer("a", &g_tA, tInv, tRec);
+        m.registerLayer("b", &g_tB, tInv, tRecFail);   // o recreate MORRE
+        m.registerLayer("c", &g_tC, tInv, tRec);
+        g_tA = g_tB = g_tC = true;
+
+        // o invalidate pela ORDEM e tudo inválido
+        m.invalidateAll();
+        EXPECT_MSG(!g_tA && !g_tB && !g_tC,
+                   "0.12-Z F1: o invalidate não correu nas 3 camadas");
+
+        // o recreateAll para no 1.º falhado (a camada b) e REPORTA
+        g_tA = g_tB = g_tC = false;
+        EXPECT_MSG(!m.recreateAll(),
+                   "0.12-Z F1: o recreateAll devia falhar na camada b");
+        EXPECT_MSG(std::strcmp(m.lastFailed(), "b") == 0,
+                   "0.12-Z F1: o lastFailed é '%s' (esperado b)",
+                   m.lastFailed());
+        EXPECT_MSG(g_tA, "0.12-Z F1: a camada a não recriou antes do "
+                         "falhar da b (a ordem do dono)");
+        EXPECT_MSG(!g_tC, "0.12-Z F1: a camada c recriou DEPOIS do "
+                          "falhar da b (o ciclo devia ter parado)");
+
+        // o term duplo: só o que está VIVO morre — após o recreateAll
+        // falhar na b, SÓ a camada "a" está viva (a 1.ª invalidate mata-a;
+        // a 2.ª é um no-op)
+        const u32 inv0 = m.invalidations();
+        m.invalidateAll();
+        m.invalidateAll();
+        EXPECT_MSG(m.invalidations() == inv0 + 1,
+                   "0.12-Z F1: o term duplo não é idempotente (%u de 1)",
+                   (unsigned)(m.invalidations() - inv0));
+    }
+
+    // ---- as camadas GL do PRODUTO recriam individualmente (o boot em
+    // passos do dono) — no hospedeiro SEM as fontes do sistema, as camadas
+    // GL puras (sem texto) são o contrato testável
+    EXPECT(g_glResources.recreateLayer("gpu-cube"));
+    EXPECT(g_cubeMesh.ok());
+    EXPECT(g_glResources.recreateLayer("grid"));
+    EXPECT(g_glResources.recreateLayer("sky"));
+    EXPECT(g_glResources.recreateLayer("particles"));
+    EXPECT(g_glResources.recreateLayer("renderer"));
+    EXPECT(g_glResources.isValid("grid"));
+    EXPECT(g_glResources.isValid("renderer"));
+}
+
+// ---------------------------------------------------------------------------
+// 6. A CÂMARA SÃ (0.12-Z F1): NaN/fora dos limites → o PADRÃO (a cena
+// fica); câmara sã → SÓ os clamps de sempre (byte a byte).
+// ---------------------------------------------------------------------------
+TEST(camera_sana) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+
+    // a câmara com NaN (o estado degenerado que um term a meio do gesto
+    // pode deixar) repõe o padrão
+    const f32 nan = std::numeric_limits<f32>::quiet_NaN();
+    g_camera.target = Vec3{nan, 0.0f, 0.0f};
+    cameraEnsureSane();
+    EXPECT_MSG(nearEqF(g_camera.target.x, 0.0f, 1e-6f) &&
+                   nearEqF(g_camera.dist, 6.0f, 1e-5f),
+               "0.12-Z F1: a câmara com NaN não repôs o padrão "
+               "(target.x=%f dist=%f)", (double)g_camera.target.x,
+               (double)g_camera.dist);
+    EXPECT(nearEqF(g_camera.fovY, 1.0472f, 1e-3f));
+
+    // a distância fora dos limites clampa (sem reset — o zoom excessivo é
+    // clamped, não destruído)
+    g_camera.dist = 1e9f;
+    cameraEnsureSane();
+    EXPECT_MSG(g_camera.dist < 1e8f,
+               "0.12-Z F1: a distância gigante não clampou (%f)",
+               (double)g_camera.dist);
+
+    // a câmara sã fica byte a byte (os clamps de sempre não mudam nada)
+    const Camera sane;
+    g_camera.target = sane.target;
+    g_camera.yaw = sane.yaw;
+    g_camera.pitch = sane.pitch;
+    g_camera.dist = sane.dist;
+    g_camera.fovY = sane.fovY;
+    const f32 yaw0 = g_camera.yaw;
+    cameraEnsureSane();
+    EXPECT(nearEqF(g_camera.yaw, yaw0, 1e-7f));
+    EXPECT(nearEqF(g_camera.dist, 6.0f, 1e-5f));
 }

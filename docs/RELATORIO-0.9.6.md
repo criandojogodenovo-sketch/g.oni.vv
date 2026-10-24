@@ -835,3 +835,19 @@ NOVO) + R-065 regress_glctx_fase0 + M-Z1/M-Z2 VERMELHAS AO VIVO ·
 test_core 0 falhas (GONI_SKIP dos flakes de disco documentados da
 sandbox — o CI é o árbitro) · gates VERDES · **versionCode 125** — o
 par declarado aqui e no build config (a regra do §14).
+
+### §14-p — 0.12-Z F1 (o GLResourceManager + a câmara sã) — versionCode 126
+
+**G8** (o par declarado no MESMO commit, a regra do §14): a FASE 1 da
+campanha anti-perda de contexto (o RELATORIO-0.12-Z-GLCTX.md §F1):
+render/GlResources.h NOVO (o GLResourceManager — a FONTE ÚNICA da lista
+de invalidação/recriação; o achado: o g_particles.destroy() FALTAVA na
+lista manual do term da 0.6.7), as 8 camadas registadas no android_main,
+o term via invalidateAll(), o boot [3/6]/[4/6] via recreateLayer() com o
+break do renderer obrigatório preservado, cameraEnsureSane() no
+INIT/RESIZED/RESUME e editorRecalcHitCaches(). A auditoria da fila
+UI→render (o item 6 do dono): NÃO há corrida por construção (a UI corre
+na thread de render; o Java drena via storage::pollResult()/ImeQueue no
+topo do frame). pins ×2 (glresources_ciclo, camera_sana) + R-066
+regress_glctx_fase1 · test_core 0 falhas (o CI é o árbitro) · gates
+VERDES · **versionCode 126** — o par declarado aqui e no build config.

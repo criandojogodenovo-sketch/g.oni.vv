@@ -1,7 +1,7 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-24 · vc: 125 · Último commit: este (a 0.12-Z F0 —
-o DIAGNÓSTICO do contexto GL; o RELATORIO-0.12-Z-GLCTX.md §F0);
+Atualizado: 2026-10-24 · vc: 126 · Último commit: este (a 0.12-Z F1 —
+o GLResourceManager + a câmara sã; o RELATORIO-0.12-Z-GLCTX.md §F1);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -9,8 +9,21 @@ o DIAGNÓSTICO do contexto GL; o RELATORIO-0.12-Z-GLCTX.md §F0);
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-Z (ANTI-PERDA DE CONTEXTO OPENGL + A SOMBRA) — F0
-  FECHADA (vc 125)** (a cláusula calma: SÓ o ciclo de vida GL/render +
+- **Campanha 0.12-Z (ANTI-PERDA DE CONTEXTO OPENGL + A SOMBRA) — F0 e
+  F1 FECHADAS (vc 125/126)**. **F1 (vc 126)**: render/GlResources.h
+  NOVO — o GLResourceManager (a FONTE ÚNICA da lista de
+  invalidação/recriação; o ACHADO: o g_particles.destroy() FALTAVA na
+  lista manual do term da 0.6.7 — a camada F1 é posterior); as 8
+  camadas registadas no android_main; o term via invalidateAll(); o
+  boot [3/6]/[4/6] via recreateLayer() com o break do renderer
+  obrigatório preservado (o M-Z4 ao vivo: o for sem break deixava o
+  boot continuar SEM RENDER); cameraEnsureSane() no INIT/RESIZED/
+  RESUME (NaN → o padrão, a cena fica); editorRecalcHitCaches(). A
+  auditoria da fila UI→render: NÃO há corrida por construção (a UI é a
+  thread de render; o Java drena via pollResult/ImeQueue no topo do
+  frame). 0 FBOs (o item FBO/FBO-check do dono: nada a recriar —
+  documentado). pins ×2 + R-066 regress_glctx_fase1 + M-Z3/M-Z4.
+  **F0 (vc 125)** (a cláusula calma: SÓ o ciclo de vida GL/render +
   testes; UI visual, V.ONI, importadores, física e .gmesh INTACTOS; a
   história no RELATORIO-0.12-Z-GLCTX.md). **F0 (vc 125) — o
   DIAGNÓSTICO sem mudar comportamento**: render/GlDebug.h NOVO (os

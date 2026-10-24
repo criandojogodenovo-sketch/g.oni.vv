@@ -82,12 +82,12 @@ Atualizado: 2026-10-24 · vc: 124
   uWind — o vento GLOBAL do 1.º WindTIC ATIVO, a sobrecarga pura
   particlePos com vento), GlDebug.h (**0.12-Z F0**: o DIAGNÓSTICO do
   contexto GL — toggles POR PASSE, contadores, estado por passe),
-  **0.12-D (DORMENTE desde a 0.12-E)**: D-1 o SdfBatch.h + o 3.º
-  PROGRAMA progSdf_ (o FS replica o app/src/main/cpp/ui/Sdf.h LINHA A
-  LINHA; runs pelo flag `sdf`) + D-3 o ramo FOGO-ONLY replicando o
-  app/src/main/cpp/ui/Fire.h + D-2 o app/src/main/cpp/ui/Glass.h (o
-  KAWASE dual, a cache glassCacheDirty) + o captureGlass + o ramo
-  uSdfTexOn.
+  GlResources.h (**0.12-Z F1**: o GLResourceManager — a FONTE ÚNICA da
+  recriação do contexto; 8 camadas; a câmara sã no lifecycle),
+  **0.12-D (DORMENTE desde a 0.12-E)**: o SdfBatch.h + o 3.º PROGRAMA
+  progSdf_ (o FS replica o app/src/main/cpp/ui/Sdf.h; runs pelo flag
+  `sdf`) + o ramo FOGO-ONLY + o Glass.h (o KAWASE dual) + o captureGlass
+  + o ramo uSdfTexOn.
 - **app/src/main/cpp/assets/** — importadores e formatos GL-free:
   GOwnFormats (.gmesh/.gtext/.gm), GmeshV3Stream (o streaming do
   conversor), GltfImporter/GltfAnim/GltfTextures/GltfInstantiate (os

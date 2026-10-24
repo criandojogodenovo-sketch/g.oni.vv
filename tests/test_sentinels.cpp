@@ -9116,3 +9116,81 @@ TEST(regress_glctx_fase0) {
             "R-065: o LitMaterial deixou de contar a morte");
     }
 }
+
+// R-066 (0.12-Z F1) — A RECRIAÇÃO DO CONTEXTO TEM DONO —
+// regress_glctx_fase1: o GLResourceManager é a FONTE ÚNICA da lista de
+// invalidação/recriação (o term manual da 0.6.7 MORREU), o boot recria
+// PELO GESTOR (o renderer obrigatório mantém o break), a câmara SÃ corre
+// no INIT/RESIZE/RESUME e os caches de hit-test recalcam.
+TEST(regress_glctx_fase1) {
+    std::string src;
+    EXPECT(readFileText(
+        REPO_ROOT "/app/src/main/cpp/platform/main.cpp", src));
+    const std::string code = test::stripCppComments(src);
+    // (1) o gestor registado no arranque e usado no TERM (a lista manual
+    //     da 0.6.7 foi SUBSTITUÍDA — o invalidateAll manda)
+    EXPECT_MSG(code.find("glResourcesRegister();") != std::string::npos,
+               "R-066: o registo das camadas saiu do android_main");
+    EXPECT_MSG(code.find("g_glResources.invalidateAll();") !=
+                   std::string::npos,
+               "R-066: o TERM deixou de usar o gestor");
+    // a lista MANUAL de destroys NÃO voltou ao term (a região do CASE é
+    // que manda — os wrappers das camadas contêm os destroys legítimos)
+    {
+        const size_t term = code.find("case APP_CMD_TERM_WINDOW:");
+        ASSERT(term != std::string::npos);
+        const size_t nextCase =
+            code.find("case APP_CMD_", term + 10);
+        const std::string termBody = code.substr(
+            term, nextCase == std::string::npos ? std::string::npos
+                                                : nextCase - term);
+        EXPECT_MSG(termBody.find("g_font.destroy()") == std::string::npos &&
+                       termBody.find("g_grid.destroy()") ==
+                           std::string::npos &&
+                       termBody.find("g_sky.destroy()") ==
+                           std::string::npos &&
+                       termBody.find("g_renderer.shutdown()") ==
+                           std::string::npos,
+                   "R-066: a lista MANUAL de destroys voltou ao term (o "
+                   "gestor é a fonte única — as fugas de camada nova "
+                   "voltam)");
+    }
+    // (2) o boot recria PELO GESTOR (o renderer obrigatório mantém o break)
+    EXPECT_MSG(code.find("g_glResources.recreateLayer(bl.name)") !=
+                   std::string::npos,
+               "R-066: o boot deixou de recriar as camadas pelo gestor");
+    EXPECT_MSG(code.find("{\"gpu-cube\", \"mesh do cubo\"}") !=
+                   std::string::npos,
+               "R-066: a lista de boot do gestor sumiu");
+    EXPECT_MSG(code.find("if (!rendererOk) {") != std::string::npos,
+               "R-066: o break do renderer obrigatório sumiu (o boot "
+               "continuaria sem render — a regressão que o CI apanhou)");
+    // (3) a câmara SÃ nos três eventos do lifecycle
+    {
+        const size_t iInit = code.find("cameraEnsureSane();");
+        const size_t iResized = code.find("cameraEnsureSane();", iInit + 1);
+        const size_t iResume = code.find("cameraEnsureSane();", iResized + 1);
+        EXPECT_MSG(iInit != std::string::npos && iResized != iInit &&
+                       iResume > iResized && iResume != std::string::npos,
+                   "R-066: a câmara sã não corre no INIT/RESIZE/RESUME "
+                   "(encontrados %zu sítios)",
+                   (size_t)(iInit != std::string::npos) +
+                       (size_t)(iResized != iInit) +
+                       (size_t)(iResume != std::string::npos &&
+                                iResume != iResized));
+    }
+    EXPECT_MSG(code.find("editorRecalcHitCaches();") != std::string::npos,
+               "R-066: os caches de hit-test deixaram de recalcular");
+    // (4) o gestor existe com o contrato (ordem + falha reportada)
+    {
+        std::string h;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/render/GlResources.h", h));
+        const std::string hc = test::stripCppComments(h);
+        EXPECT_MSG(hc.find("void invalidateAll()") != std::string::npos &&
+                       hc.find("bool recreateAll()") != std::string::npos &&
+                       hc.find("bool recreateLayer(const char* name)") !=
+                           std::string::npos,
+                   "R-066: o contrato do gestor sumiu");
+    }
+}

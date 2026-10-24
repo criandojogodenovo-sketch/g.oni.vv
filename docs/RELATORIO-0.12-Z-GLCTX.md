@@ -130,7 +130,68 @@ o log de erros apanha GL errors do passe.
 
 ---
 
-## §F1 — A RECRIAÇÃO CORRETA DO CONTEXTO (a preencher no commit da fase)
+## §F1 — A RECRIAÇÃO CORRETA DO CONTEXTO (FASE 1)
+
+### F1.1 — O QUE ENTROU
+
+| Ficheiro | O que faz |
+|---|---|
+| `render/GlResources.h` (NOVO) | o **GLResourceManager**: `registerLayer(name, owner, invalidate, recreate)` (a ORDEM da 0.6.7), `invalidateAll()` (o TERM/perda — nunca para numa camada morta), `recreateAll()` (para no 1.º falhado e REPORTA `lastFailed`), `recreateLayer(name)` (o boot em passos), os contadores `invalidations/recreations`. GL-free, testável no CI |
+| `platform/main.cpp` | as 8 camadas registadas UMA vez no android_main (font, font-mono, gpu-cube, gpu-imp-quad, grid, sky, particles, renderer — **a partícula FALTAVA na lista manual do term**, o achado do F1); o TERM usa `invalidateAll()` (a lista manual MORREU); o boot [3/6]/[4/6] recria PELO GESTOR com a numeração do dono intacta; **o renderer obrigatório mantém o break** (sem render não há frame — o mesmo comportamento de sempre); **`cameraEnsureSane()`** (NaN/fora dos limites → o PADRÃO, a cena fica; sã → só os clamps) no INIT/RESIZED/RESUME; **`editorRecalcHitCaches()`** (o gizmo/grab/lookTrack recalcam — os caches de ecrã velhos apontavam janelas que já não existem) |
+
+### F1.2 — O RELATÓRIO DE 16 ITENS (FASE 1)
+
+1. **Objetivo**: o contexto EGL pode morrer a qualquer pausa/rotação/janela
+   /OOM — a recriação correta com DONO único; o caso "preservado"
+   documentado (NativeActivity pura: o contexto morre no term — se algum
+   OEM preservar, o invalidate+recreate continua correto, os velhos
+   objetos leakam 1× e o log mostra).
+2. **Causa raiz (ficheiro:linha)**: a lista de destroys do term era MANUAL
+   (main.cpp:5652..5700 da árvore F0) — **o `g_particles.destroy()`
+   FALTAVA** (a camada de 0.12-Y-F1 é POSTERIOR à lista 0.6.7): depois de
+   um term, o `g_particles.init()` do boot recriava por cima de handles
+   órfãos (o init chama destroy() primeiro — os ids velhos eram deletados
+   NO CONTEXTO NOVO onde não existem: inofensivo mas frágil; qualquer
+   camada futura entraria na mesma lista morta).
+3. **Sintomas cobertos**: a recriação correta (o dono: «nenhum handle GL
+   nem uniform location em cache ou static sobrevive»); a câmara
+   degenerada no resume; os caches de hit-test velhos no resize.
+4. **O que mudou**: F1.1 (2 ficheiros).
+5. **O que NÃO foi tocado**: o render de cada passe, a cena, os formatos,
+   V.ONI, importadores, física, o layout visual da UI.
+6. **FBOs (o item 5 do dono)**: NÃO EXISTEM no motor (0×
+   `glGenFramebuffers` — o F0.2 provou); o `glCheckFramebufferStatus` não
+   tem alvo; a nota fica no §F0.2 — nada a recriar.
+7. **A fila UI→render (o item 6 do dono)**: A AUDITORIA provou que NÃO há
+   corrida por construção: a UI do editor corre NA THREAD DE RENDER
+   (immediate-mode no frame()); os únicos caminhos Java→native são o
+   storage (a fila `storage::pollResult()` drenada NO TOPO do frame —
+   main.cpp:9500) e o IME (a fila ImeQueue — o MESMO padrão). Nada a
+   mudar; o contrato fica documentado.
+8. **A proibição de one-time init (o item 4)**: a auditoria
+   `static bool` em render/* devolveu ZERO guardes de init único (o F0
+   aferiu); o gestor reforça: o recreate pode correr MUITAS vezes.
+9. **Logs novos**: `glresources: 8 camadas registadas…` (no boot do
+   processo), `glresources: camada X FALHOU a recriar` (a degradação com
+   dono), `camera: estado inválido … repõe o PADRÃO (a cena fica)`.
+10. **Testes novos**: `glresources_ciclo` (a ordem + a falha sob controlo
+    com camadas de TESTE — o ambiente tem fontes de sistema e não é
+    determinístico; as camadas GL do produto recriam individualmente) ·
+    `camera_sana` (NaN → o padrão; 1e9 → clamp; sã → byte a byte).
+11. **Sentinela**: **R-066** `regress_glctx_fase1` — o registo no
+    android_main; o term SEM a lista manual (a região do CASE é que
+    manda); o boot pelo gestor com o break do renderer; a câmara sã nos
+    TRÊS eventos; o contrato do gestor no fonte.
+12. **Verificação local**: test_core 0 falhas; gates verdes.
+13. **CI**: o run do commit desta fase (o F0 fechou verde no e09c2e5).
+14. **Capturas**: as do dono no device (o ciclo sair→voltar com o
+    «Exportar layout»); o engine.log mostra o inventário term↔init.
+15. **Riscos**: o recreateLayer("font") no hospedeiro de CI depende das
+    fontes do sistema (o teste usa camadas de TESTE para a ordem/falha —
+    determinístico por construção).
+16. **Próximo passo**: FASE 2 — a origem da sombra e a ordem dos passes
+    (o reset de estado à entrada de cada passe; os clamps do WE).
+
 
 ## §F2 — A ORIGEM DA SOMBRA E A ORDEM DOS PASSES (a preencher)
 
