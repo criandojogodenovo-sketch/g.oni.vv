@@ -4594,7 +4594,35 @@ void blockRebind() {
         MeshRenderer& mr = mrs.at(i);
         mr.blocks = nullptr;
         if (!mr.meshPath.empty()) {
+            // 0.12-Z2 F1 — O REBIND DO ASSET PÓS-RECUPERAÇÃO: a sonda da
+            // perda (contextRecover) desliga mr.mesh e esvazia o GpuAssets
+            // SEM reload de cena; antes disto NADA re-abria o asset (o
+            // pass 3D via `!mr.mesh && !mr.blocks → continue` e A CENA
+            // SUMIA até ao próximo INIT — o dono: «a grelha some»; a
+            // grelha voltava, a CENA não). O caminho é o MESMO do
+            // serializer (g_gpu.mesh abre+cacheia+devolve o Mesh*; para
+            // .gmesh de blocos devolve o HULL de bounds e abre a tabela —
+            // o blockMeshIfOpen de baixo liga-se). Backoff meshRebindNeg:
+            // a falha NÃO insiste por frame (o padrão primNeg).
+            if (mr.mesh == nullptr && !mr.meshRebindNeg &&
+                !mr.primPending && !mr.primOn) {
+                Mesh* reopened = g_gpu.mesh(mr.meshPath);
+                if (reopened) {
+                    mr.mesh = reopened;
+                } else {
+                    mr.meshRebindNeg = true;
+                    elog::warn("rebind: '%s' não re-abriu pós-recuperação "
+                               "(backoff até novo pedido/INIT)",
+                               mr.meshPath.c_str());
+                }
+            }
             mr.blocks = g_gpu.blockMeshIfOpen(mr.meshPath);
+            // 0.12-Z2 F1: o REBIND DA TEXTURA — o detach desligou mr.texture
+            // (não-dono); a ref texPath re-liga pelo MESMO cache do GpuAssets
+            if (mr.texture == nullptr && !mr.texPath.empty()) {
+                std::string warnTex;
+                mr.texture = g_gpu.texture(mr.texPath, &warnTex);
+            }
         }
     }
 }
@@ -4623,6 +4651,8 @@ void primMeshesDestroyAll() {
         for (u32 i = 0; i < mrs2.size(); ++i) {
             mrs2.at(i).primNeg = false;
             mrs2.at(i).primRetire = nullptr;
+            mrs2.at(i).meshRebindNeg = false;   // 0.12-Z2 F1: idem (o
+                                                // re-open ganha nova sorte)
         }
     }
     if (vivos + cova > 0) {
@@ -5545,9 +5575,18 @@ bool contextLostNow() {
         return true;
     }
     // (3) 0.12-Z2-F1BIS: o RETORNO do último eglSwapBuffers (o achado da
-    // auditoria — o EGL_FALSE era ignorado; hoje alimenta a sonda)
+    // auditoria — o EGL_FALSE era ignorado; hoje alimenta a sonda).
+    // F1-R AFIADO POR CAUSA: só EGL_CONTEXT_LOST/EGL_BAD_ALLOC são perda
+    // de contexto por spec (EGL 1.5 §2.4) — o BAD_SURFACE/
+    // BAD_NATIVE_WINDOW é a JANELA morta e espera o TERM/INIT do sistema
+    // (o desenho do swapAndWatch; a sonda NÃO recupera a surface sem o
+    // ANativeWindow novo). O ackSwapLoss do contextRecover impede a
+    // sonda de re-ver a falha ANTIGA já tratada no mesmo frame.
     if (!g_egl.lastSwapOk()) {
-        return true;
+        const EGLint swErr = g_egl.lastSwapError();
+        if (swErr == EGL_CONTEXT_LOST || swErr == EGL_BAD_ALLOC) {
+            return true;
+        }
     }
     return false;
 }
@@ -5556,6 +5595,11 @@ void contextRecover(const char* why) {
     ++g_contextRecreations;
     elog::warn("gldebug: CONTEXTO PERDIDO (%s) — a recuperação #%u começa",
                why, g_contextRecreations);
+    // 0.12-Z2 F1-R: a perda do swap foi ACEITE (o swapAndWatch ou esta
+    // sonda tratou-na) — o lastSwapOk_ volta a true para a sonda do
+    // frame seguinte NÃO re-disparar a falha antiga (o lastSwapError_
+    // fica: o pin troca-o a ferro — «nunca esquece»)
+    g_egl.ackSwapLoss();
     // o reset do ESTADO DE INTERAÇÃO na perda (o dono: o gesto atual, os
     // ponteiros, o gizmo agarrado, o eixo, o drag, a hit-test cache)
     editorRecalcHitCaches();
@@ -5605,6 +5649,29 @@ void contextEnsureAlive() {
         }
     } else {
         g_glErrorStreak = 0;
+    }
+}
+
+// 0.12-Z2 F1: O SWAP TRATADO — eglSwapBuffers devolve EGL_FALSE com
+// EGL_CONTEXT_LOST (0x300E) quando a GPU do device morre; o retorno era
+// IGNORADO (a perda só era apanhada pela sonda do frame SEGUINTE — e só
+// se o glIsProgram visse a morte). AQUI: a falha é observada no MESMO
+// frame; EGL_CONTEXT_LOST/EGL_BAD_ALLOC (perda de contexto por spec do
+// EGL 1.5 §2.4) disparam a recuperação REAL (o gestor da F1 — as camadas
+// recriadas no MESMO frame, a cena religada pelo rebind); os outros
+// erros (BAD_SURFACE/BAD_NATIVE_WINDOW — a JANELA morreu, não o
+// contexto) ficam no log e esperam o TERM/INIT que o sistema manda
+// (recuperar a surface SEM o ANativeWindow novo é impossível por
+// construção — a recuperação parcial deixaria um swap morto em loop).
+void swapAndWatch() {
+    if (g_egl.swap()) {
+        return;
+    }
+    const EGLint err = g_egl.lastSwapError();
+    elog::warn("gldebug: o swap FALHOU (0x%x) — %s", err,
+               err == EGL_CONTEXT_LOST ? "CONTEXTO PERDIDO" : "surface");
+    if (err == EGL_CONTEXT_LOST || err == EGL_BAD_ALLOC) {
+        contextRecover("EGL_CONTEXT_LOST no eglSwapBuffers");
     }
 }
 
@@ -5990,14 +6057,16 @@ void onAppCmd(android_app* app, i32 cmd) {
             // INIT_WINDOW re-cria e re-upe tudo (fonte incluída).
             g_ready = false;
             {
-                // 0.12-Z2-F1BIS (a auditoria + o fuzzing PROVARAM): o
-                // reset do ESTADO DE INTERAÇÃO no TERM também — o PAUSE e
-                // o LOST_FOCUS já repunham, mas o term A MEIO de um gesto
-                // (o Android pode destruir a janela sem cancelar o toque)
-                // deixava o ponteiro "down" com coordenadas mortas a
-                // SOBREVIVER à recriação do contexto. O dono: o reset é
-                // «em pausa, perda de foco, PERDA DE CONTEXTO,
-                // ACTION_CANCEL e redimensionamento» — o term É a perda.
+                // 0.12-Z2 F1 + F1BIS (a mesma cura, achada 2× em
+                // paralelo): o reset do ESTADO DE INTERAÇÃO no TERM — o
+                // PAUSE e o LOST_FOCUS já repunham, mas o term A MEIO de
+                // um gesto (o Android pode destruir a janela sem
+                // ACTION_CANCEL garantido) deixava o ponteiro "down"
+                // com coordenadas mortas a SOBREVIVER à recriação — o
+                // dedo fantasma arrastava a câmara no 1.º toque
+                // pós-regresso. O dono: o reset é «em pausa, perda de
+                // foco, PERDA DE CONTEXTO, ACTION_CANCEL e
+                // redimensionamento» — o term É a perda.
                 editorRecalcHitCaches();
                 g_input.resetAll();
                 const u32 detached = detachRenderersFromGpu();
@@ -6036,6 +6105,44 @@ void onAppCmd(android_app* app, i32 cmd) {
         case APP_CMD_GAINED_FOCUS:
             elog::info("lifecycle: GAINED_FOCUS (+%.2fs desde o boot)",
                        nowSeconds() - g_bootTime);
+            break;
+        // 0.12-Z2 F1: os COMANDOS que faltavam no switch — cada um com o
+        // seu registo honesto (o dono pediu a tabela COMPLETA do ciclo de
+        // vida). SEM efeito GL por construção: START/STOP são transições
+        // de VISIBILIDADE da activity (o EGL só morre no TERM_WINDOW; o
+        // input morre no PAUSE/LOST_FOCUS que o sistema manda ANTES);
+        // SAVE_STATE não transporta nada (o projeto persiste por FICHEIROS
+        // — o savedState do Android não é usado); LOW_MEMORY não toca no
+        // contexto (o kill de activity é que manda o TERM) — libertar os
+        // recursos GPU sem o ciclo completo deixaria o frame a mentir.
+        case APP_CMD_START:
+            elog::info("lifecycle: START (+%.2fs) — activity visível",
+                       nowSeconds() - g_bootTime);
+            break;
+        case APP_CMD_STOP:
+            elog::info("lifecycle: STOP (+%.2fs) — activity invisível "
+                       "(o EGL segue VIVO — o contexto só morre no "
+                       "TERM_WINDOW)",
+                       nowSeconds() - g_bootTime);
+            break;
+        case APP_CMD_SAVE_STATE:
+            // o ANativeActivity chama-o a QUALQUER momento (até no meio do
+            // frame) — NADA de GL aqui por princípio; o estado do projeto
+            // vive nos ficheiros (auto-save 180s + o save do dono)
+            elog::info("lifecycle: SAVE_STATE — nada a gravar no bundle "
+                       "do Android (o projeto persiste por ficheiros)");
+            break;
+        case APP_CMD_LOW_MEMORY:
+            // o sistema está a apertar: o REGISTO com os contadores (o
+            // dono lê a correlação no engine.log). Recursos: os meshes de
+            // prim na cova são o ÚNICO CPU-cache seguro de largar JÁ (os
+            // GpuAssets re-carregam lazy; a cena/grelha/UI não se tocam —
+            // soltar GPU sem o ciclo completo corrói o frame vivo)
+            elog::warn("lifecycle: LOW_MEMORY (+%.2fs) — inits=%u terms=%u "
+                       "recuperacoes=%u; a cova de prim liberta",
+                       nowSeconds() - g_bootTime, g_windowInits,
+                       g_windowTerms, g_contextRecreations);
+            primGraveDig();
             break;
         case APP_CMD_DESTROY:
             g_ready = false;
@@ -7850,7 +7957,7 @@ void frame() {
         g_ui.endFrame();
         g_lastUiStats = g_renderer.endFrame();
         layoutDumpIfPending(w, h);   // GRUPO B: o modal também é ecrã
-        g_egl.swap();
+        swapAndWatch();   // 0.12-Z2 F1: o swap TRATADO
         g_input.clearEdges();
         return;   // MODAL: nada mais desenha/processa este frame
     }
@@ -7903,7 +8010,7 @@ void frame() {
         g_lastUiStats = g_renderer.endFrame(); // UI por cima do 3D
         if (g_ui.auditing()) g_ui.auditEnd();
         layoutDumpIfPending(w, h);   // GRUPO B: o play também é ecrã
-        g_egl.swap();
+        swapAndWatch();   // 0.12-Z2 F1: o swap TRATADO
         g_input.clearEdges();
         return;
     }
@@ -8010,7 +8117,7 @@ void frame() {
             statusLine(st3d, stGrid);
             g_ui.endFrame();                       // submete solids + glyphs
             g_lastUiStats = g_renderer.endFrame(); // UI por cima do 3D
-            g_egl.swap();
+            swapAndWatch();   // 0.12-Z2 F1: o swap TRATADO
             g_input.clearEdges();
             return;
         }
@@ -9790,7 +9897,7 @@ void frame() {
     // antes do swap); lê o backbuffer INTEIRO + o registo do audit.
     layoutDumpIfPending(w, h);
 
-    g_egl.swap();
+    swapAndWatch();   // 0.12-Z2 F1: o swap TRATADO
     g_input.clearEdges();   // edges já consumidas pela UI/câmara neste frame
 }
 

@@ -26,6 +26,15 @@ OBJ = os.path.join(REPO, "tests", "build-obj-raster")
 BIN = os.path.join(OBJ, "raster_z2")
 MESA = "/home/z/mesa-debs/root/usr/lib/x86_64-linux-gnu"
 
+# 0.12-Z2 F1 — o build TSAN (a prova de threads do dono: «Verificar com
+# TSan no host»): os MESMOS TUs com -fsanitize=thread; os objetos saem em
+# build-obj-raster-tsan (nunca misturados com os de sempre) e o binário
+# liga com o runtime do TSan. Uso: python3 scripts/build_raster.py --tsan
+TSAN = "--tsan" in sys.argv
+if TSAN:
+    OBJ = os.path.join(REPO, "tests", "build-obj-raster-tsan")
+    BIN = os.path.join(OBJ, "raster_z2_tsan")
+
 
 def src_list():
     # idêntico ao build_c33.py: o alvo c33_virtual = ${GONI_CORE_SRCS}
@@ -98,8 +107,10 @@ def main():
                    "-I", os.path.join(REPO, "app/src/main/cpp/vendor"),
                    "-I", os.path.join(REPO, "app/src/main/cpp/vendor/etcpak"),
                    "-I", os.path.join(REPO, "app/src/main/cpp/vendor/astc-encoder")]
-            cmd = ["g++-14", "-std=c++17", "-O1", "-DNDEBUG",
+            cmd = ["g++-14", "-std=c++17", "-O1", "-g", "-DNDEBUG",
                    "-fno-omit-frame-pointer"]
+            if TSAN:
+                cmd.append("-fsanitize=thread")
             if is_harness:
                 cmd.append("-rdynamic")
             cmd += cmd_defines(s) + inc + ["-c", s, "-o", o]
@@ -120,11 +131,13 @@ def main():
             print("FALHOU:", s, "\n", err, file=sys.stderr)
         sys.exit(1)
 
-    r = subprocess.run(
-        ["g++-14", "-std=c++17", "-O1", "-o", BIN] + objs +
-        ["-L" + MESA, "-Wl,-rpath," + MESA,
-         "-lEGL", "-lGLESv2", "-lz", "-lpthread"],
-        capture_output=True, text=True)
+    link = ["g++-14", "-std=c++17", "-O1", "-g"]
+    if TSAN:
+        link.append("-fsanitize=thread")
+    link += ["-o", BIN] + objs + [
+        "-L" + MESA, "-Wl,-rpath," + MESA,
+        "-lEGL", "-lGLESv2", "-lz", "-lpthread"]
+    r = subprocess.run(link, capture_output=True, text=True)
     if r.returncode != 0:
         print("LINK FALHOU:\n", r.stderr[-6000:], file=sys.stderr)
         sys.exit(1)

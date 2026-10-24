@@ -1,13 +1,32 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-25 · vc: 134 · Último commit: este (a 0.12-Z2 F3 —
-o clima visível + o P0 do uLifetime; o RELATORIO-0.12-Z2-RASTER.md §F3);
+Atualizado: 2026-10-25 · vc: 135 · Último commit: este (a 0.12-Z2 F1-R —
+o contexto GL por fuzzing em 1500 ciclos, FUNDO com a F1BIS e rebaseado
+sobre a F3; o RELATORIO-0.12-Z2-F1.md §F1-R);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
 > Atualiza-se no MESMO commit que fecha a sub-fase (regra §6 abaixo).
 
 ## §1 Onde estamos
+
+- **Campanha 0.12-Z2 — F1-R FECHADA (vc 134)**. A F1 completa (o rework
+  da F1-original, rebaseado SOBRE a F2 e FUNDO com a F1BIS): a PROVA POR
+  FUZZING — 1500 ciclos (1200 TERM/INIT reais + 300 contextRecover da
+  sonda), 8 cenários (WE × clima × painel), gesto agarrado em ~30%,
+  frame seguinte IDÊNTICO byte a byte em TODOS, input vivo em TODOS (a
+  câmara orbita), RSS plano, 0 TSan. OS 2 P0 MORTOS: o ATLAS FANTASMA
+  (o invalidateAll saltava camadas inválidas × o guard `if (tex_)` do
+  FontAtlas — a UI perdia TODO o texto a partir do 2.º ciclo; o
+  invalidate corre para TODAS e o contador conta TRANSIÇÕES — inv0+1, a
+  R-070 atualizada) e A CENA QUE SUMIA na via da sonda (o blockRebind
+  re-abre pelo meshPath com backoff). A FUSÃO com a F1BIS: o swap()
+  fundido (bool + lastSwapError_ + lastSwapOk_ + o ackSwapLoss
+  anti-duplo-disparo), a sonda afiada POR CAUSA (só CONTEXT_LOST/
+  EGL_BAD_ALLOC; o BAD_SURFACE espera o TERM/INIT), o TERM repõe o
+  input (a mesma cura achada 2× em paralelo), o lifecycle completo,
+  pins ×5 + o z2_audit_term_reseta_input. O harness com o ABORT limpo
+  sem driver. A história no RELATORIO-0.12-Z2-F1.md (§F1-R).
 
 - **Campanha 0.12-Z2 (CONTEXTO GL + WE + CLIMA + AUDITORIA TOTAL) — F3
   FECHADA (vc 134)**. O CLIMA VISÍVEL: **O ACHADO P0** — o uniform

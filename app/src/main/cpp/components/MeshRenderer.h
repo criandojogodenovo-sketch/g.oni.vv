@@ -208,6 +208,16 @@ public:
     bool       primPending = false;
     Mesh*      primRetire = nullptr;
     bool       primNeg = false;
+
+    // 0.12-Z2 F1 — O REBIND PÓS-RECUPERAÇÃO (runtime-only, nunca
+    // serializado): a recuperação da sonda (contextRecover SEM reload de
+    // cena — o caminho REAL do EGL_CONTEXT_LOST) desliga mr.mesh/mr.blocks
+    // (detachRenderersFromGpu) e esvazia o GpuAssets; o blockRebind() do
+    // frame RE-ABRE o asset pelo meshPath (o MESMO g_gpu.mesh do
+    // serializer). Este flag é o BACKOFF (o padrão do primNeg): a falha
+    // de re-open NÃO insiste por frame (anti retry-storm de IO); um
+    // pedido NOVO (pick/params/load) ou o INIT_WINDOW limpam a flag.
+    bool       meshRebindNeg = false;
 };
 
 } // namespace vv

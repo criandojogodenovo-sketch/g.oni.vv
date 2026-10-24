@@ -438,24 +438,34 @@ TEST(glresources_ciclo) {
         EXPECT_MSG(!g_tC, "0.12-Z F1: a camada c recriou DEPOIS do "
                           "falhar da b (o ciclo devia ter parado)");
 
-        // o term duplo (0.12-Z2 F1 — o ACHADO do fuzzing no GLES REAL,
-        // raster_z2 --fuzz): o invalidate corre SEMPRE — inclusive na
-        // camada cujo recreate FALHOU (a mono no OEM enxuto falha SEMPRE).
-        // O salto antigo `if (!l.valid) continue` deixava essa camada
-        // permanentemente inválida: o term seguinte SALTAVA o destroy e o
-        // handle do contexto morto sobrevivia (o guard `if (tex_)` do
-        // FontAtlas "recriava" com id morto = TEXTO MORTO após sair e
-        // voltar — o sintoma do dono). Os wrappers são IDEMPOTENTES (o
-        // 2.º destroy é no-op seguro): o duplo term invalida 2× as 3
-        // camadas e os estados ficam todos mortos.
+        // o term duplo: só o que está VIVO morre — após o recreateAll
+        // falhar na b, SÓ a camada "a" está viva (a 1.ª invalidate mata-a;
+        // a 2.ª é um no-op)
         const u32 inv0 = m.invalidations();
         m.invalidateAll();
         m.invalidateAll();
-        EXPECT_MSG(m.invalidations() == inv0 + 6,
-                   "0.12-Z2 F1: o term duplo invalida SEMPRE (%u de 6)",
+        EXPECT_MSG(m.invalidations() == inv0 + 1,
+                   "0.12-Z F1: o term duplo não é idempotente (%u de 1)",
                    (unsigned)(m.invalidations() - inv0));
-        EXPECT_MSG(!g_tA && !g_tB && !g_tC,
-                   "0.12-Z2 F1: os wrappers aguentam o destroy duplo");
+
+        // 0.12-Z2 F1 — O ATLAS FANTASMA: a camada b (recreate FALHOU) fica
+        // inválida, mas o DONO pode ter recursos vivos carregados por fora
+        // (a fonte fallback do hospedeiro; a recuperação manual do device).
+        // O invalidateAll tem de CORRER o destroy mesmo em camadas já
+        // inválidas — sem isto o handle ficava STALE e o recreate seguinte
+        // «tinha sucesso» com o recurso MORTO (o fuzz da F1: a UI perdeu
+        // TODO o texto a partir do 2.º ciclo de contexto, diff 5337 px)
+        g_tB = true;   // o dono carregou à mão (o atlas do fixture)
+        m.invalidateAll();
+        EXPECT_MSG(!g_tB,
+                   "0.12-Z2 F1: o ATLAS FANTASMA — o invalidate NÃO limpou "
+                   "o dono de uma camada já inválida (o handle stale "
+                   "sobrevivia ao term e o recreate mentia sucesso)");
+        // e o contador só contou a «a» (a b já estava inválida)
+        EXPECT_MSG(m.invalidations() == inv0 + 1,
+                   "0.12-Z2 F1: o invalidate de camada já inválida contou "
+                   "como nova (%u)",
+                   (unsigned)(m.invalidations() - inv0));
     }
 
     // ---- as camadas GL do PRODUTO recriam individualmente (o boot em
@@ -669,10 +679,6 @@ TEST(simulate_loss_recupera) {
 }
 
 // ---------------------------------------------------------------------------
-// 0.12-Z2-F1BIS (a auditoria + a mutação M-Z10): o TERM resetA o ESTADO
-// DE INTERAÇÃO — o gesto injetado NÃO sobrevive à perda de contexto (o
-// PAUSE e o LOST_FOCUS já repunham; o term FALTAVA — o Android pode
-// destruir a janela a meio do toque sem ACTION_CANCEL garantido).
 // ---------------------------------------------------------------------------
 TEST(z2_audit_term_reseta_input) {
     rmrf(kTestLogs);
@@ -699,3 +705,211 @@ TEST(z2_audit_term_reseta_input) {
     EXPECT_MSG(!g_glResources.isValid("grid"),
                "0.12-Z2-F1BIS: o term não invalidou as camadas (contrato)");
 }
+
+// ---------------------------------------------------------------------------
+TEST(swap_tratado_recupera_no_mesmo_frame) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetCtxTest();
+    glstub::fb::enabled = true;
+    javaRegistersGranted();
+    bootEditor();
+    buildCubeScene();
+    g_recoveryCooldown = 0;
+    g_glErrorStreak = 0;
+    const u32 rec0 = g_contextRecreations;
+
+    // o DEVICE REAL: o swap do fim do frame falha com EGL_CONTEXT_LOST
+    eglstub::g_swapFailError = EGL_CONTEXT_LOST;
+    frame();   // o swapAndWatch vê a falha e corre o contextRecover
+    eglstub::g_swapFailError = 0;   // o knob sai (um frame de morte só)
+
+    EXPECT_MSG(g_contextRecreations == rec0 + 1,
+               "0.12-Z2 F1: o swap falhado NÃO recuperou (%u → %u)",
+               rec0, g_contextRecreations);
+    EXPECT_MSG(g_egl.lastSwapError() == EGL_CONTEXT_LOST,
+               "0.12-Z2 F1: o lastSwapError é 0x%x (esperado 0x300E)",
+               (unsigned)g_egl.lastSwapError());
+    // o PARITY do host: a camada font falhou (não há /system/fonts) e o
+    // recreateAll PARA na 1.ª — as camadas seguintes recriam à mão (o
+    // MESMO padrão do saude() do c33; no device corre sozinho)
+    g_recoveryCooldown = 0;
+    g_glResources.recreateLayer("gpu-cube");
+    g_glResources.recreateLayer("grid");
+    g_glResources.recreateLayer("sky");
+    g_glResources.recreateLayer("particles");
+    g_glResources.recreateLayer("renderer");
+    // o erro NÃO é perda de contexto (BAD_SURFACE: a janela morreu): a
+    // recuperação GL NÃO corre — o TERM/INIT do sistema trata a janela
+    g_glErrorStreak = 0;
+    const u32 rec1 = g_contextRecreations;
+    eglstub::g_swapFailError = 0x300C;   // EGL_BAD_SURFACE
+    frame();
+    eglstub::g_swapFailError = 0;
+    EXPECT_MSG(g_contextRecreations == rec1,
+               "0.12-Z2 F1: o BAD_SURFACE disparou a recuperação GL "
+               "(%u → %u — só o TERM/INIT trata a janela)",
+               rec1, g_contextRecreations);
+}
+
+// ---------------------------------------------------------------------------
+TEST(term_reseta_o_input) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetCtxTest();
+    glstub::fb::enabled = true;
+    javaRegistersGranted();
+    bootEditor();
+    buildCubeScene();
+
+    g_input.injectDown(0, 640.0f, 360.0f);   // um dedo «preso» no ecrã
+    g_input.injectDown(1, 200.0f, 500.0f);   // ...e um segundo
+    EXPECT(g_input.down(0) && g_input.down(1));
+
+    android_app app;
+    std::memset(&app, 0, sizeof(app));
+    // a HIGIENE entre testes: o contentRect PRÓPRIO (o rect a zero
+    // cuspia insets 0 na safe area GLOBAL e partia os testes seguintes —
+    // a lição da bissecação do topbar) e o projeto fechado (o INIT pós-
+    // term não recarrega cena nenhuma — o caminho «scene SEM PROJETO»)
+    app.contentRect = {0, 24, 1256, 720};
+    g_projectReady = false;
+    onAppCmd(&app, APP_CMD_TERM_WINDOW);
+    EXPECT_MSG(!g_input.down(0) && !g_input.down(1),
+               "0.12-Z2 F1: o TERM deixou ponteiros PRESOS (o dedo "
+               "fantasma do 1.º toque pós-regresso)");
+
+    // o regresso (INIT) e a vida segue
+    onAppCmd(&app, APP_CMD_INIT_WINDOW);
+    EXPECT(g_ready);
+    // a HIGIENE: a fonte da fixture repõe (o recreate das fontes de
+    // sistema FALHA no hospedeiro; sem isto o atlas ficava MORTO para os
+    // testes seguintes — a 2.ª metade da lição da bissecação)
+    if (!g_font.ok()) {
+        const char* paths[] = {FONT_FIXTURE};
+        g_font.loadFromPaths(paths, 1, 28.0f);
+        g_ui.setFont(&g_font);
+    }
+    g_input.injectDown(0, 640.0f, 360.0f);
+    EXPECT(g_input.down(0));
+    g_input.injectUp(0);
+    EXPECT(!g_input.down(0));
+}
+
+// ---------------------------------------------------------------------------
+TEST(rebind_pos_recuperacao_a_cena_volta) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetCtxTest();
+    glstub::fb::enabled = true;
+
+    // o projeto REAL (o caminho do raster_z2): OBJ legado + cena com o TIC
+    // pelo meshPath — o boot migra e resolve via g_gpu.mesh
+    auto st = std::make_unique<FakeStorage>();
+    FakeStorage* rawSt = st.get();
+    EXPECT(vv::Project::createNew(*rawSt, "pin-z2f1", g_project));
+    g_storage = std::move(st);
+    g_projectReady = true;
+    g_resources.setStorage(rawSt);
+    g_gpu.init(&g_resources);
+    rawSt->makeDirs("meshes");
+    rawSt->writeText("meshes/cubo.obj",
+                     "o cubo\n"
+                     "v -0.5 -0.5 -0.5\nv 0.5 -0.5 -0.5\nv 0.5 0.5 -0.5\n"
+                     "v -0.5 0.5 -0.5\nv -0.5 -0.5 0.5\nv 0.5 -0.5 0.5\n"
+                     "v 0.5 0.5 0.5\nv -0.5 0.5 0.5\n"
+                     "f 1 2 3\nf 1 3 4\nf 5 6 7\nf 5 7 8\n"
+                     "f 1 5 8\nf 1 8 4\nf 2 6 7\nf 2 7 3\n"
+                     "f 4 8 7\nf 4 7 3\nf 1 2 6\nf 1 6 5\n");
+    {
+        const Handle h = g_scene.create("CuboPin");
+        ASSERT(h.valid());
+        if (Transform3D* tr = g_scene.get(h)->addComponent<Transform3D>()) {
+            tr->pos = Vec3{0.0f, 0.5f, 0.0f};
+            tr->updateWorld();
+        }
+        if (MeshRenderer* mr = g_scene.get(h)->addComponent<MeshRenderer>()) {
+            mr->meshPath = "meshes/cubo.obj";
+        }
+        EXPECT(g_project.saveActiveScene(*rawSt, g_scene));
+    }
+    g_scene.clear();
+    javaRegistersGranted();
+    bootEditor();   // o INIT carrega a cena do storage (o caminho do device)
+
+    const Handle hCubo = g_scene.find("CuboPin");
+    ASSERT(hCubo.valid());
+    MeshRenderer* mr = g_scene.get(hCubo)->getComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+    EXPECT_MSG(mr->mesh != nullptr && !mr->meshPath.empty(),
+               "0.12-Z2 F1: o load não ligou o mesh do meshPath (setup)");
+    const u32 gpu0 = g_gpu.meshCount();
+    EXPECT(gpu0 >= 1);
+
+    // A PERDA REAL (o caminho da sonda — SEM reload de cena): o detach
+    // desliga o ponteiro e o GpuAssets sai... e o REBIND do MESMO frame
+    // (o blockRebind corre no ponto seguro DEPOIS do contextRecover no
+    // TOPO do frame) re-abre o asset JÁ — o P0 morto no frame da perda
+    g_recoveryCooldown = 0;
+    g_glErrorStreak = 0;
+    g_simulateLossFrames = 1;
+    frame();   // a sonda vê a morte → contextRecover → blockRebind re-abre
+    EXPECT_MSG(mr->mesh != nullptr,
+               "0.12-Z2 F1: o REBIND não re-abriu o mesh pós-recuperação "
+               "(a cena sumia no caminho da sonda — o P0)");
+    EXPECT_MSG(g_gpu.meshCount() == gpu0,
+               "0.12-Z2 F1: o re-open não repôs o GpuAssets (%u → %u)",
+               (unsigned)gpu0, (unsigned)g_gpu.meshCount());
+    EXPECT(!mr->meshRebindNeg);   // o re-open correu — sem backoff
+
+    // O BACKOFF (anti retry-storm): um meshPath QUEBRADO não insiste por
+    // frame — a flag arma e o IO não repete
+    mr->meshPath = "meshes/inexistente.obj";
+    mr->mesh = nullptr;
+    frame();
+    frame();
+    frame();
+    EXPECT_MSG(mr->mesh == nullptr && mr->meshRebindNeg,
+               "0.12-Z2 F1: o backoff do rebind não armou (retry-storm de "
+               "IO no caminho da sonda)");
+    // o pedido NOVO limpa o backoff (o contrato do primNeg)
+    mr->meshPath = "meshes/cubo.obj";
+    mr->meshRebindNeg = false;
+    frame();
+    EXPECT_MSG(mr->mesh != nullptr,
+               "0.12-Z2 F1: o pedido novo não re-abriu (o backoff limpou?)");
+}
+
+// ---------------------------------------------------------------------------
+TEST(lifecycle_comandos_restantes_sem_efeito_gl) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetCtxTest();
+    glstub::fb::enabled = true;
+    javaRegistersGranted();
+    bootEditor();
+    buildCubeScene();
+    android_app app;
+    std::memset(&app, 0, sizeof(app));
+
+    const u32 rec0 = g_contextRecreations;
+    const u32 inits0 = g_windowInits;
+    const u32 terms0 = g_windowTerms;
+    onAppCmd(&app, APP_CMD_START);
+    onAppCmd(&app, APP_CMD_STOP);
+    onAppCmd(&app, APP_CMD_SAVE_STATE);
+    onAppCmd(&app, APP_CMD_LOW_MEMORY);
+    onAppCmd(&app, APP_CMD_START);
+
+    EXPECT_MSG(g_ready, "0.12-Z2 F1: os comandos novos derrubaram o g_ready");
+    EXPECT_MSG(g_contextRecreations == rec0,
+               "0.12-Z2 F1: LOW_MEMORY/STOP dispararam recuperação GL "
+               "(não deviam — o contexto segue vivo)");
+    EXPECT_MSG(g_windowInits == inits0 && g_windowTerms == terms0,
+               "0.12-Z2 F1: os comandos novos contaram como init/term");
+    EXPECT(g_glResources.isValid("renderer"));
+    frame();   // o render segue com o contexto de sempre
+    EXPECT(g_ready);
+    EXPECT(g_contextRecreations == rec0);
+}
+

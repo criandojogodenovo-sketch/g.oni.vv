@@ -5198,6 +5198,8 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
                 mr->meshPath = rel;
                 mr->primOn = false;   // 0.8.0: asset LIMPA o prim (fonte única)
                 mr->primPending = false;
+                mr->meshRebindNeg = false;   // 0.12-Z2 F1: pedido NOVO —
+                                             // o backoff do rebind morre
                 // 0.8.9 (fix 3 do prompt): FATOR ÚNICO s = alvo / maiorEixo,
                 // aplicado aos 3 EIXOS — PROPORÇÕES PRESERVADAS (nunca o
                 // escalamento eixo-a-eixo que espalmava o modelo). A escala

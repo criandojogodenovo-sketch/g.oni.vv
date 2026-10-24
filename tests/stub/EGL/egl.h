@@ -20,6 +20,11 @@ typedef void* EGLNativeWindowType;
 #define EGL_TRUE 1
 #define EGL_FALSE 0
 #define EGL_SUCCESS 0x3000
+// 0.12-Z2 F1: o swap TRATADO — o EglContext lê o erro do eglSwapBuffers
+// (o stub devolve EGL_TRUE de sempre; o knob g_stubEglSwapError abaixo
+// deixa o CI SIMULAR a falha e aferrar a recuperação)
+#define EGL_CONTEXT_LOST 0x300E
+#define EGL_BAD_ALLOC 0x3003
 #define EGL_ALPHA_SIZE 0x3021
 #define EGL_BLUE_SIZE 0x3022
 #define EGL_GREEN_SIZE 0x3023
@@ -75,7 +80,18 @@ inline EGLContext eglCreateContext(EGLDisplay, EGLConfig, EGLContext, const EGLi
 }
 inline int eglDestroyContext(EGLDisplay, EGLContext) { return 1; }
 inline int eglMakeCurrent(EGLDisplay, EGLSurface, EGLSurface, EGLContext) { return 1; }
-inline int eglSwapBuffers(EGLDisplay, EGLSurface) { return 1; }
+// 0.12-Z2 F1: o KNOB da falha — o CI simula a morte do swap (o device:
+// eglSwapBuffers devolve EGL_FALSE com EGL_CONTEXT_LOST). 0 = o caminho
+// de sempre (swap OK); != 0 = FALHA e o valor é o «erro EGL» devolvido
+// pelo eglGetError do stub. A pin do swap TRATADO arma isto e aferra a
+// recuperação REAL (contextRecover) sem device.
+namespace eglstub { inline int g_swapFailError = 0; }
+inline int eglSwapBuffers(EGLDisplay, EGLSurface) {
+    return eglstub::g_swapFailError ? EGL_FALSE : EGL_TRUE;
+}
+// o eglGetError do stub: o erro armado do knob (consumido pelo swap do
+// EglContext — o MESMO contrato do device)
+inline EGLint eglGetError() { return eglstub::g_swapFailError; }
 // 0.12-Z F3: as sondas do contexto (o hospedeiro responde "vivo" — o
 // shape é o mesmo do device; a perda SIMULADA usa o botão da F4)
 #define EGL_DRAW 0x3059
@@ -92,7 +108,7 @@ inline int eglQuerySurface(EGLDisplay, EGLSurface, EGLint attr, EGLint* v) {
                                        : eglstub::g_surfaceH; }
     return 1;
 }
-inline int eglGetError() { return 0; }                        // F5.2 link parity
+// (eglGetError vive ATRÁS com o knob g_swapFailError — 0.12-Z2 F1)
 inline int eglSwapInterval(EGLDisplay, EGLint) { return 1; }  // F5.2 link parity
 
 #define EGL_NO_DISPLAY ((EGLDisplay)0)

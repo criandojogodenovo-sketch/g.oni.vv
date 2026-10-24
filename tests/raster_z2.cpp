@@ -633,8 +633,10 @@ int sky2Run(int poses_) {
     return failures;
 }
 
-int fuzzRun(int cycles, u32 seed) {
-    std::printf("\n== FASE 1 — FUZZING DO CONTEXTO (%d ciclos, seed %u) ==\n",
+int fuzzRun(int cycles, u32 seed, bool modoB = false) {
+    std::printf("\n== FASE 1 — FUZZING DO CONTEXTO (%s; %d ciclos, seed %u) ==\n",
+                modoB ? "MODO B: contextRecover da sonda, SEM reload de cena"
+                      : "MODO A: TERM/INIT real",
                 cycles, seed);
     FuzzRng rng(seed);
     int failures = 0;
@@ -716,17 +718,42 @@ int fuzzRun(int cycles, u32 seed) {
         }
 
         // ---- a PERDA (o ciclo REAL do device: TERM + INIT) ----
-        onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
-        onAppCmd(&g_app, APP_CMD_INIT_WINDOW);
-        loadFixtureFontIfDead();       // o parity da fonte (hospedeiro)
-        selectCuboByName();            // o reload re-cria os TICs
-        if (gesto) {
-            g_input.injectUp(0);       // o dedo solta (o device também solta)
+        if (modoB) {
+            // 0.12-Z2 F1-bis — O MODO B: o caminho da SONDA
+            // (EGL_CONTEXT_LOST/botão «Reiniciar renderer»): o contexto
+            // GL morre SEM ciclo de janela — o contextRecover invalida as
+            // camadas + o detach dos MeshRenderers + o releaseAll; A CENA
+            // NÃO RECARREGA (os TICs ficam) e o REBIND do blockRebind
+            // (o fix desta fase) repõe os assets pelo meshPath — é ISTO
+            // que o modo B aferra em pixels
+            contextRecover("fuzz-modo-B (a sonda)");
+            // o parity do host: a font falha sem /system/fonts e o
+            // recreateAll PARA na 1.ª — as camadas seguintes recriam à
+            // mão (no device corre sozinho); a fonte da fixture repõe
+            g_glResources.recreateLayer("gpu-cube");
+            g_glResources.recreateLayer("grid");
+            g_glResources.recreateLayer("sky");
+            g_glResources.recreateLayer("particles");
+            g_glResources.recreateLayer("renderer");
+            loadFixtureFontIfDead();
+            if (gesto) {
+                g_input.injectUp(0);   // o dedo solta (o reset já o matou;
+                                       // o UP é pelo contrato do gesto)
+            }
+            // SEM selectCuboByName e SEM applyScenario: a cena NÃO morreu
+            // no modo B (o rebind é a prova)
+        } else {
+            onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
+            onAppCmd(&g_app, APP_CMD_INIT_WINDOW);
+            loadFixtureFontIfDead();   // o parity da fonte (hospedeiro)
+            selectCuboByName();        // o reload re-cria os TICs
+            if (gesto) {
+                g_input.injectUp(0);   // o dedo solta (o device idem)
+            }
+            // o cenário re-aplica (os TICs não gravados morrem no reload
+            // — o contrato) — a MESMA applyScenario do pré-loss
+            applyScenario(scenario);
         }
-        // o cenário re-aplica (os TICs não gravados morrem no reload — o
-        // contrato; o device idem: o utilizador re-põe ou grava a cena) —
-        // a MESMA applyScenario do pré-loss
-        applyScenario(scenario);
         // o ASSENTAMENTO: as animações da UI (o fade dos painéis/véus
         // recomeça no reload — o mesmo no device) correm 60 frames ANTES
         // do congelamento (com dt=0 o fade fica na opacidade inicial e o
@@ -1292,6 +1319,10 @@ int climaRun() {
 
 int main(int argc, char** argv) {
     const bool fuzzMode = argc > 1 && std::strcmp(argv[1], "--fuzz") == 0;
+    // 0.12-Z2 F1-bis: o MODO B (contextRecover da sonda, sem reload) —
+    // o caminho do EGL_CONTEXT_LOST e do botão «Reiniciar renderer»;
+    // aferra o REBIND do blockRebind em pixels (a cena NÃO recarrega)
+    const bool fuzzBMode = argc > 1 && std::strcmp(argv[1], "--fuzzb") == 0;
     const bool sky2Mode = argc > 1 && std::strcmp(argv[1], "--sky2") == 0;
     const bool climaMode = argc > 1 && std::strcmp(argv[1], "--clima") == 0;
     const int sky2Poses = argc > 2 ? std::atoi(argv[2]) : 200;
@@ -1344,6 +1375,23 @@ int main(int argc, char** argv) {
     onAppCmd(&g_app, APP_CMD_INIT_WINDOW);
     std::printf("[mk] INIT done\n"); std::fflush(stdout);
     check(g_ready, "boot: INIT_WINDOW completo (g_ready) com GLES REAL");
+    // 0.12-Z2 F1-R (a lição do ambiente reconstruído): se o EGL NÃO abriu
+    // (w/h=0) o readFrame devolve VAZIO e a primeira regionStats com
+    // coordenadas fixas faz SEGFAULT em vez de falhar — abortar JÁ com o
+    // diagnóstico do protocolo (não há prova sem driver):
+    //   DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 \
+    //   LD_LIBRARY_PATH=/home/z/mesa-debs/root/usr/lib/x86_64-linux-gnu \
+    //   __EGL_VENDOR_LIBRARY_FILENAMES=…/50_mesa.json
+    if (g_egl.width() != 1280 || g_egl.height() != 720) {
+        std::printf(
+            "FALHA AMBIENTAL: o EGL NÃO abriu (w=%d h=%d) — sem driver não "
+            "há prova.\n    Protocolo: DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 "
+            "LD_LIBRARY_PATH=/home/z/mesa-debs/root/usr/lib/x86_64-linux-gnu "
+            "__EGL_VENDOR_LIBRARY_FILENAMES=<mesa>/50_mesa.json\n",
+            g_egl.width(), g_egl.height());
+        std::fflush(stdout);
+        return 1;
+    }
     check(g_egl.width() == 1280 && g_egl.height() == 720,
           "boot: superficie 1280x720 (pbuffer real)");
     // o PARITY do device: no device a camada "font" re-bake de
@@ -1357,9 +1405,10 @@ int main(int argc, char** argv) {
     // a seleção do TIC Cubo (o gizmo vivo — o estado do dono)
     selectCuboByName();
     check(g_hCubo.valid(), "boot: o TIC Cubo carregado da cena (migration legado→gmesh)");
-    if (fuzzMode) {
+    if (fuzzMode || fuzzBMode) {
         // FASE 1: o fuzzing usa o MESMO boot; as fases A-D não correm
-        const int f = fuzzRun(fuzzCycles, fuzzSeed);
+        // (o --fuzzb: o MODO B — contextRecover da sonda, sem reload)
+        const int f = fuzzRun(fuzzCycles, fuzzSeed, /*modoB=*/fuzzBMode);
         onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
         std::printf("\n%s (falhas=%d)\n", f ? "FUZZ FALHOU" : "FUZZ OK", f);
         return f ? 1 : 0;

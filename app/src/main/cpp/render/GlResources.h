@@ -64,24 +64,29 @@ public:
     // Nunca lança nem para — uma camada que falhe ao morrer é logada e o
     // ciclo continua (o próximo recreate recomeça pelo destroy de qualquer
     // forma).
-    // 0.12-Z2 F1 (o ACHADO do fuzzing no GLES REAL — raster_z2 --fuzz): o
-    // salto `if (!l.valid) continue` deixava a camada que FALHOU a recriar
-    // (ex.: a font no OEM enxuto — a mono FALHA SEMPRE lá) PERMANENTEMENTE
-    // inválida: o term seguinte SALTAVA o destroy dela e o handle velho
-    // (tex_ de um contexto MORTO) sobrevivia — o guard `if (tex_)` do
-    // FontAtlas.cpp:117 então "recriava" com o id morto = TEXTO MORTO
-    // depois de sair e voltar (o sintoma do dono no device). O invalidate
-    // é IDEMPOTENTE POR CONTRATO (o destroy de cada camada começa pelo
-    // `if (obj != 0)`) — corre SEMPRE, válido ou não.
+    // 0.12-Z2 F1 — O ATLAS FANTASMA: o skip das camadas «já inválidas»
+    // MENTIA quando um recreate tinha FALHADO no ciclo anterior (a camada
+    // inválida mas o DONO com recursos vivos carregados por fora — a fonte
+    // de sistema que falhou e o fallback/manual que carregou): o destroy
+    // NÃO corria, o handle ficava STALE e o `if (tex_) return true` do
+    // FontAtlas vendia o recreate seguinte como sucesso COM A TEXTURA
+    // MORTA — a UI perdia TODO o texto a partir do 2.º ciclo (o fuzz da
+    // F1 apanhou-o: diff 5337 px, só caixas e ícones, zero glifos). O
+    // invalidate corre agora para TODAS (idempotente por construção —
+    // cada destroy é guard por handle nulo; o contador de invalidações
+    // só conta as NOVAS).
     void invalidateAll() {
         for (u32 i = 0; i < count_; ++i) {
             Layer& l = layers_[i];
-            if (l.invalidate && !l.invalidate(l.owner)) {
+            const bool jaInvalida = !l.valid;
+            if (l.invalidate && !l.invalidate(l.owner) && !jaInvalida) {
                 elog::warn("glresources: camada %s FALHOU ao invalidar "
                            "(o recreate recomeça pelo destroy)", l.name);
             }
-            l.valid = false;
-            ++invalidations_;
+            if (!jaInvalida) {
+                l.valid = false;
+                ++invalidations_;
+            }
         }
     }
 

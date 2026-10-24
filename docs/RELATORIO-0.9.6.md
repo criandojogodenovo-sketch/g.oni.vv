@@ -986,3 +986,29 @@ POR PÍXEL: chuva 1431 / neve 1627 / trovoada 1986 px, o follow 6984 px a
 vivo: o max() e o upload do uLifetime) · raster_z2 27/0 · raster_z2
 --clima 0/0 · raster_z2 --fuzz 150/0 · test_core 0 falhas · c33 1113/0 ·
 **versionCode 134** — o par declarado aqui e no build config.
+### §14-y — 0.12-Z2 F1-R (o contexto GL: a prova por fuzzing fundida com a F1BIS e rebaseada sobre a F3) — versionCode 135
+
+**G8** (o par declarado no MESMO commit, a regra do §14): a FASE 1
+completa da campanha Z2 (o RELATORIO-0.12-Z2-F1.md): a PROVA POR
+FUZZING do dono — 1500 ciclos de destruição/recriação do contexto
+(1200 TERM/INIT reais + 300 contextRecover da sonda), 8 cenários
+(WorldEnvironment × clima × painel), gesto agarrado em ~30% dos ciclos,
+frame seguinte IDÊNTICO byte a byte em TODOS, input vivo em TODOS (a
+câmara orbita), RSS plano 181→191MB, 0 avisos TSan no build --tsan.
+OS 2 P0 MORTOS: o ATLAS FANTASMA (o invalidateAll saltava camadas
+inválidas + o guard do FontAtlas vendia o recreate com a textura morta —
+a UI perdia todo o texto a partir do 2.º ciclo) e A CENA QUE SUMIA na
+via da sonda (o contextRecover desligava os MeshRenderers e nada
+re-abria — o blockRebind re-abre agora pelo meshPath pelo caminho do
+serializer, com backoff anti retry-storm). Mais: o eglSwapBuffers
+falhado (EGL_CONTEXT_LOST 0x300E) recuperava no MESMO frame (o retorno
+era ignorado — EglContext::swap devolve bool + swapAndWatch), o TERM
+repõe o input (o dedo fantasma do 1.º toque pós-regresso), os comandos
+START/STOP/SAVE_STATE/LOW_MEMORY entram no switch (logs honestos).
+pins ×5 (swap_tratado · term_reseta · rebind_pos_recuperacao ·
+lifecycle_comandos · o pin do atlas fantasma no glresources_ciclo) ·
+test_core 0 falhas de código · c33_virtual 1113/0 · raster_z2 F0 27/0 ·
+gates VERDES · **versionCode 135** — o par declarado aqui e no build
+config (a §14-w é a F1BIS e a §14-x é a F3; esta é a F1-R rebaseada
+por cima de ambas, com o swap() fundido, a sonda afiada por causa e
+o ackSwapLoss).

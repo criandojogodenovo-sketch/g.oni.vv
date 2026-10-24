@@ -82,13 +82,27 @@ void EglContext::refreshSize() {
     }
 }
 
-void EglContext::swap() {
-    if (display_ != EGL_NO_DISPLAY && surface_ != EGL_NO_SURFACE) {
-        // 0.12-Z2-F1BIS: o RETORNO do swap é VERIFICADO — o EGL_FALSE
-        // aqui (EGL_BAD_NATIVE_WINDOW/EGL_CONTEXT_LOST) é sinal de perda
-        // e alimenta a sonda do frame (contextLostNow)
-        lastSwapOk_ = (eglSwapBuffers(display_, surface_) == EGL_TRUE);
+bool EglContext::swap() {
+    // 0.12-Z2 F1 + F1BIS FUNDIDOS: o retorno do eglSwapBuffers era
+    // IGNORADO — no device a GPU pode morrer (EGL_CONTEXT_LOST 0x300E) e
+    // o erro caía no chão. Agora: a falha → bool false + o eglGetError
+    // GUARDADO (lastSwapError_, o chamador decide a recuperação por
+    // CAUSA — EGL_BAD_ALLOC também é perda por spec do EGL, ver
+    // swapAndWatch no main) E o lastSwapOk_ (a sonda de perda do frame
+    // consome — contextLostNow; o F1BIS)
+    if (display_ == EGL_NO_DISPLAY || surface_ == EGL_NO_SURFACE) {
+        lastSwapOk_ = false;   // sem surface não há swap (o term já correu)
+        return false;
     }
+    if (eglSwapBuffers(display_, surface_) == EGL_TRUE) {
+        lastSwapOk_ = true;
+        lastSwapError_ = 0;
+        return true;
+    }
+    lastSwapOk_ = false;
+    lastSwapError_ = eglGetError();
+    LOGW("EGL: eglSwapBuffers FALHOU (0x%x)", lastSwapError_);
+    return false;
 }
 
 void EglContext::shutdown() {

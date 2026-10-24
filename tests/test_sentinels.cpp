@@ -9412,14 +9412,23 @@ TEST(regress_glctx_z2_fase1) {
     //     lido no fonte CRU: o stripCppComments come os comentários)
     EXPECT_MSG(src.find("0.12-Z2 F1") != std::string::npos,
                "R-070: a nota do achado do fuzzing saiu do GlResources.h");
-    // (3) o pin do term duplo aferra o contrato novo (2× as 3 camadas)
+    // (3) o pin do term duplo aferra o contrato F1-R (0.12-Z2 F1-R: o
+    //     contador conta TRANSIÇÕES válida→inválida — o nº REAL de perdas
+    //     — e não o nº de chamadas: um TERM duplo (Android faz
+    //     TERM/INIT/TERM/INIT) NÃO dobra o contador nem infla o
+    //     «GL: RECRIADO n»; o contrato F1 contava inv0+6, o que vendia
+    //     2 perdas onde só houve UMA. O ESSENCIAL inalterado: o destroy
+    //     CORRE sempre (aferido pelo próprio pin nas linhas do «O
+    //     invalidateAll tem de CORRER o destroy mesmo em camadas já
+    //     inválidas») e o salto proibido no check (1) acima.
     {
         std::string pin;
         EXPECT(readFileText(REPO_ROOT "/tests/test_012z_ctx.cpp", pin));
         const std::string c = test::stripCppComments(pin);
-        EXPECT_MSG(c.find("inv0 + 6") != std::string::npos,
-                   "R-070: o pin do term duplo voltou ao contrato velho "
-                   "(inv0 + 1 — o salto é o bug)");
+        EXPECT_MSG(c.find("inv0 + 1") != std::string::npos &&
+                       c.find("inv0 + 6") == std::string::npos,
+                   "R-070: o pin do term duplo não aferra o contrato F1-R "
+                   "(inv0 + 1 — as TRANSIÇÕES, não as chamadas)");
     }
 }
 
