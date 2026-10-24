@@ -881,3 +881,17 @@ automático). O picking provado CPU puro (0 leituras GL no caminho do
 gizmo). pin context_recovery_ciclo + R-068 regress_glctx_fase3 ·
 test_core 0 falhas · gates VERDES · **versionCode 128** — o par
 declarado aqui e no build config.
+
+### §14-s — 0.12-Z F4 (a simulação da perda + os 20 cenários) — versionCode 129
+
+**G8** (o par declarado no MESMO commit, a regra do §14): a FASE 4 da
+campanha (o RELATORIO-0.12-Z-GLCTX.md §F4): o botão «Simular perda de
+contexto» (SÓ com o mestre do debug ON — o flag arma 1 frame de sonda
+morta e a recuperação REAL corre, zero atalho) e os 20 CENÁRIOS do dono
+no replay do device (10 SEM WE + 10 COM WE: boot/TERM+INIT/RESIZED/tabs/
+painel/PAUSE+RESUME+foco/perda simulada — cada um aferra a saúde inteira
+das camadas do gestor). O critério «deteta, recria e continua em menos de
+1 segundo» provado: a recuperação corre DENTRO de 1 frame. pin
+simulate_loss_recupera + R-069 regress_glctx_fase4 · test_core 0 falhas ·
+c33_virtual 1113/0 (era 1008 — +105 checks dos cenários) · gates VERDES ·
+**versionCode 129** — o par declarado aqui e no build config.

@@ -1,7 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-24 · vc: 128 · Último commit: este (a 0.12-Z F3 —
-a deteção/recuperação do contexto; o RELATORIO-0.12-Z-GLCTX.md §F3);
+Atualizado: 2026-10-24 · vc: 129 · Último commit: este (a 0.12-Z F4 —
+a simulação da perda + os 20 cenários; o RELATORIO-0.12-Z-GLCTX.md
+§F4);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -9,30 +10,31 @@ a deteção/recuperação do contexto; o RELATORIO-0.12-Z-GLCTX.md §F3);
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-Z (ANTI-PERDA DE CONTEXTO OPENGL + A SOMBRA) — F0..F3
-  FECHADAS (vc 125..128)**. **F3 (vc 128)**: a sonda por frame no topo do
-  frame() (2 chamadas EGL + glIsProgram/glIsTexture + o glGetError em
-  série com limiar 30 — o erro isolado não é perda), a recuperação PELO
-  GESTOR da F1 (o reset da interação → o detach → o releaseAll → o
-  invalidateAll → o recreateAll → a câmara sã; a falha arma o cooldown de
-  30 frames — nunca martelar), os resets no PAUSE/LOST_FOCUS (o
-  ACTION_CANCEL já soltava — InputState.cpp:41), o chip «GL: OK/RECRIADO
-  n» só no debug e o botão «Reiniciar renderer» nas Definições (o MESMO
-  caminho do automático). O picking provado CPU puro (0 leituras GL). pin
+- **Campanha 0.12-Z (ANTI-PERDA DE CONTEXTO OPENGL + A SOMBRA) — F0..F4
+  FECHADAS (vc 125..129)**. **F4 (vc 129)**: o botão «Simular
+  perda» (debug-only; 1 frame de sonda morta — a recuperação REAL corre,
+  zero atalho) + os 20 CENÁRIOS no c33 (10 SEM WE + 10 COM WE: boot/
+  TERM+INIT/RESIZED/tabs/painel/PAUSE+RESUME/foco/perda). O critério
+  «recupera em <1 s» provado (1 frame). c33 1113/0. pin
+  simulate_loss_recupera + R-069 + M-Z8. **F3 (vc
+  128)**: a sonda por frame (2 EGL + glIsProgram/glIsTexture + o
+  glGetError em série, limiar 30), a recuperação PELO GESTOR da F1 (o
+  reset da interação → o detach → o releaseAll → o invalidateAll → o
+  recreateAll → a câmara sã; a falha arma o cooldown de 30), os resets no
+  PAUSE/LOST_FOCUS (o ACTION_CANCEL já soltava), o chip «GL: OK/RECRIADO
+  n» e o botão «Reiniciar renderer». Picking CPU puro. pin
   context_recovery_ciclo + R-068 + M-Z6/M-Z7. **F2 (vc 127)** **F2 (vc 127)**: a CAUSA RAIZ da sombra (o
   fogDensity NaN PASSAVA pela clamp — comparações com NaN sempre falsas —
   e envenenava a exp2 do lit FS: outColor NaN = o PRETO; §F2.1); a cura
-  na FONTE (Environment::sane em TODOS os f32), a névoa em highp
-  + fogD·fogD, a grelha com o trio EXPLÍCITO, o depth func reposto à
-  entrada do 3D. pin env_sana_nan + R-067 + M-Z5. **F1 (vc 126)**: render/GlResources.h
+  na FONTE (Environment::sane), a névoa em highp, a grelha EXPLÍCITA,
+  o depth func reposto. pin env_sana_nan + R-067 + M-Z5. **F1 (vc 126)**: render/GlResources.h
   NOVO — o GLResourceManager (a FONTE ÚNICA da recriação; o ACHADO: o
   g_particles.destroy() FALTAVA na lista manual do term da 0.6.7); as 8
   camadas no android_main; o term via invalidateAll(); o boot via
-  recreateLayer() com o break do renderer obrigatório (o M-Z4 ao vivo:
-  o for sem break deixava o boot continuar SEM RENDER);
-  cameraEnsureSane() no INIT/RESIZED/RESUME; editorRecalcHitCaches().
-  A fila UI→render: NÃO há corrida por construção. 0 FBOs. pins ×2 +
-  R-066 + M-Z3/M-Z4.
+  recreateLayer() com o break do renderer (o M-Z4: o for sem break
+  deixava o boot continuar SEM RENDER); cameraEnsureSane() +
+  editorRecalcHitCaches() no lifecycle. A fila UI→render: sem corrida
+  por construção. 0 FBOs. pins ×2 + R-066 + M-Z3/M-Z4.
   **F0 (vc 125)** (a cláusula calma: SÓ o ciclo de vida GL/render +
   testes; UI visual, V.ONI, importadores, física e .gmesh INTACTOS).
   **O DIAGNÓSTICO**: render/GlDebug.h NOVO (os
@@ -50,25 +52,18 @@ a deteção/recuperação do contexto; o RELATORIO-0.12-Z-GLCTX.md §F3);
   dormente) e o §F0.4 ANALISA O CLIMA «não funciona» (a causa mais
   provável: presets sub-pixel — 0.015 m ≈ 1.3 px a 720p/7u; + o
   contexto perdido + o g_fxTime congelado + a origem no 0,0,0 + o NONE
-  que silencia) — a decisão é do dono). 0 FBOs. pins ×4 + R-065 + M-Z1/M-Z2.
+  que silencia) — a decisão é do dono). 0 FBOs. pins ×4 + R-065.
 
 - **Campanha 0.12-Y-F2 (O CLIMA E O VENTO) — FECHADA no código
   (vc 124; a história no RELATORIO-0.12-Y-F2-WEATHER.md)** (a cláusula
-  calma: SÓ o prompt — física, V.ONI, importador glTF e tema INTACTOS;
-  a DECISÃO DE ARQUITETURA do dono honrada: o AmbientEnvironment NÃO
-  renderiza partículas — CONFIGURA o ParticleEmitter do MESMO TIC).
-  **F2 (vc 124)**: o WindTIC (o vento GLOBAL: direção normalizada +
-  força 0..10; o 1.º ATIVO manda; a fonte pura windVector) · o
-  AmbientEnvironment (NONE/RAIN/SNOW/STORM + intensity; o
-  applyWeatherPreset com os valores EXATOS do prompt corre NA CRIAÇÃO
-  E na mudança no Inspector; o updateStorm com o flash 1.0 → 3.0/s e o
-  re-agenda random(3,8)s) · o VS das partículas ganha
-  `+ (uWind * localTime)` (a F1 byte a byte sem vento) · o FS do céu
-  ganha a linha do uThunderFlash (FLASH DE ECRÃ, sem geometria de
-  raio) · os presets Wind/Rain/Snow/Storm (o «+» com 13 itens) · o
-  .goni transporta weather/intensity + dir/strength (o runtime NUNCA
-  viaja) · o Inspector ganha as secções Wind (3 sliders + força) e
-  Ambient (o ciclar + intensidade; o aviso honesto sem emissor).
+  calma: SÓ o prompt; a DECISÃO DE ARQUITETURA honrada: o clima NÃO
+  renderiza — CONFIGURA o ParticleEmitter do MESMO TIC). **F2 (vc
+  124)**: o WindTIC (o vento GLOBAL, a fonte pura windVector) · o
+  AmbientEnvironment (o applyWeatherPreset com os valores EXATOS corre
+  NA CRIAÇÃO E no Inspector; o updateStorm do flash) · o VS ganha
+  `+ (uWind * localTime)` · o FS do céu ganha o uThunderFlash · os
+  presets Wind/Rain/Snow/Storm · o .goni transporta (o runtime NUNCA
+  viaja) · as secções Wind/Ambient no Inspector.
   pins ×5 (wind_tic_cria · ambient_rain_preset · ambient_snow_preset ·
   ambient_serialize · wind_uniform_passed — tests/test_012y_f2.cpp
   NOVO) + R-064 regress_weather + M-Yg1/M-Yg2 VERMELHAS AO VIVO. O

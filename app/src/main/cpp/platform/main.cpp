@@ -5495,11 +5495,20 @@ void editorRecalcHitCaches() {
 u32 g_contextRecreations = 0;   // o contador do indicador de saúde
 u32 g_glErrorStreak = 0;        // os glGetError seguidos (o limiar 30)
 u32 g_recoveryCooldown = 0;     // os frames de espera entre tentativas
+u32 g_simulateLossFrames = 0;   // 0.12-Z F4: o botão «simular perda»
+                                // (1 frame de sonda morta — a recuperação
+                                // REAL corre o ciclo completo, sem atalho)
 
 static constexpr u32 kGlErrorStreakMax = 30;   // ~0.5 s a 60 fps
 static constexpr u32 kRecoveryCooldownFrames = 30;
 
 bool contextLostNow() {
+    // 0.12-Z F4: a SIMULAÇÃO (o botão do dono) — o teste da recuperação
+    // sem matar o EGL de verdade: 1 frame com a sonda a ver morte
+    if (g_simulateLossFrames > 0) {
+        --g_simulateLossFrames;
+        return true;
+    }
     // (1) o EGL: contexto/surface nulos = perdido (a sonda mais barata)
     if (eglGetCurrentContext() == EGL_NO_CONTEXT ||
         eglGetCurrentSurface(EGL_DRAW) == EGL_NO_SURFACE) {
@@ -8170,6 +8179,19 @@ void frame() {
                 } else {
                     showToast("recuperação falhou — ver o engine.log");
                 }
+                break;
+            }
+            case editor::settings::kSimulateLoss: {
+                // 0.12-Z F4 — O TESTE DA RECUPERAÇÃO SEM MATAR O EGL: o
+                // flag arma 1 frame de sonda morta e a recuperação REAL
+                // (contextRecover) corre no próximo frame — o app continua
+                // (o dono: «invalida os handles para testar a recuperação»)
+                g_simulateLossFrames = 1;
+                g_glErrorStreak = 0;
+                showToast("perda simulada — a recuperação vem no próximo "
+                          "frame");
+                elog::warn("gldebug: PERDA SIMULADA armada (o ciclo real "
+                           "da recuperação corre no próximo frame)");
                 break;
             }
             case editor::settings::kOpenTextWindow: {

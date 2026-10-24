@@ -333,4 +333,56 @@ probes da própria sonda.
     testes 20/20.
 
 
-## §F4 — A PREVENÇÃO E OS TESTES 20/20 (a preencher)
+## §F4 — A PREVENÇÃO E OS TESTES 20/20 (FASE 4)
+
+### F4.1 — O QUE ENTROU
+
+| Peça | Onde | O que faz |
+|---|---|---|
+| O botão «Simular perda de contexto» | Definições → Diagnóstico (SÓ com o mestre do debug ON) | arma 1 frame de sonda morta (`g_simulateLossFrames`) — a recuperação REAL (`contextRecover`) corre no frame seguinte: o ciclo completo, SEM atalho (o dono: «invalida os handles para testar a recuperação») |
+| OS 20 CENÁRIOS | tests/c33_virtual.cpp — a FASE 0.12-Z-F4 | 10 SEM WE + 10 COM WE: (1) o estado de partida, (2) SAIR E VOLTAR (TERM+INIT — o contexto morre e nasce), (3) RODAR (RESIZED), (4..6) as tabs 3D→UI→Áudio→3D, (7..8) o painel de baixo abre/fecha, (9) outra app pesada (PAUSE+LOST_FOCUS+GAINED+RESUME), (10) a PERDA SIMULADA. Em cada um: 3 frames correm, `g_ready`, o renderer/grelha VIVOS no gestor, a cena inteira, ZERO cooldown pendente, e o contador da recuperação sobe EXATAMENTE 1 na simulação |
+| O aviso claro na Consola | o F0 (o toggle «log: glGetError por passe») + a F3 (a sonda loga a perda/recuperação SEMPRE — nunca silêncio) | o dono: «nada de falhas silenciosas» — a recuperação loga o começo e o fim; o FBO inexistente não tem alvo (0 FBOs) |
+
+### F4.2 — O RELATÓRIO DE 16 ITENS (FASE 4)
+
+1. **Objetivo**: a prevenção (os avisos) + o teste da recuperação (o
+   botão) + os 20/20 do dono.
+2. **Causa raiz da campanha**: fechada nas F2 (o NaN da névoa) e F3 (o
+   circuito aberto); a F4 fecha com a PROVA em loop.
+3. **Sintomas cobertos**: o critério do dono «após simular perda de
+   contexto, o app deteta, recria e continua em menos de 1 segundo» — os
+   cenários correm 3 frames após cada evento (a recuperação real corre
+   DENTRO do 1.º frame — ~16 ms a 60 fps, MUITO abaixo de 1 s).
+4. **O que mudou**: main.cpp (o flag da simulação), SettingsPage.{h,cpp}
+   (a linha debug-only), c33_virtual.cpp (a FASE dos 20 cenários, +105
+   checks), test_012z_ctx.cpp (o pin), stubs.
+5. **O que NÃO foi tocado**: o render, a UI visual, V.ONI, importadores,
+   física, .gmesh, o tema.
+6. **Ordem dos passes**: a da F2, intocada.
+7. **Estado GL**: os 20 cenários aferem as camadas VIVAS no gestor em
+   CADA evento (o renderer e a grelha nunca morrem sem voltar).
+8. **Logs novos**: «PERDA SIMULADA armada (o ciclo real corre no próximo
+   frame)».
+9. **Interruptores**: a simulação é debug-only (o mestre).
+10. **Testes novos**: `simulate_loss_recupera` (host) + os 20 cenários no
+    c33 (1113 checks no total, era 1008).
+11. **Sentinela**: **R-069** `regress_glctx_fase4` (o flag + o despacho +
+    o botão debug-only + os cenários com os eventos).
+12. **Verificação local**: test_core 0 falhas; c33_virtual 1113/0; gates
+    verdes.
+13. **CI**: o run do commit desta fase.
+14. **Capturas**: as do dono — o chip «GL: RECRIADO n» (o contador sobe
+    exatamente 1 por simulação) + o engine.log com os pares
+    «CONTEXTO PERDIDO/COMPLETA».
+15. **Riscos**: a simulação NÃO mata o EGL (o flag engana a sonda) — o
+    device real continua a poder perder contexto por fora; a recuperação
+    é a MESMA (a fonte única).
+16. **O CRITÉRIO DE ACEITAÇÃO (o inventário do dono)**: ✓ a sombra com
+    causa fechada (o §F2.1 — o NaN da névoa) e as candidatas isoláveis
+    (o F0); ✓ a grelha e os gizmos sempre visíveis (o F2 o trio
+    explícito; os cenários aferem); ✓ a recuperação < 1 s (a F3 num
+    frame); ✓ zoom/pan/orbitar/seleção após qualquer resume (o reset da
+    interação no PAUSE/RESUME/LOST_FOCUS/INIT — a F1+F3); ✓ os 20/20 (os
+    cenários). O passe culpado FINAL cabe ao dono no device (os toggles
+    do F0 fecham o resto — o H1 do scrim preso é a favorita restante).
+

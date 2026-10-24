@@ -10576,6 +10576,130 @@ int main() {
               "quente — a rampa do ícone real, o mono âmbar morreu)");
     }
 
+    // =====================================================================
+    // == FASE 0.12-Z-F4 — OS 20 CENÁRIOS DO DONO (10 SEM WE + 10 COM WE) ==
+    // O ciclo ANTI-PERDA-DE-CONTEXTO inteiro pelo caminho REAL: sair e
+    // voltar (TERM+INIT), rodar (RESIZED), alternar 3D/UI/Áudio, abrir/
+    // fechar o painel de baixo, outra app pesada (PAUSE+RESUME + foco) e a
+    // PERDA SIMULADA (a recuperação real do F3). Em CADA cenário: frames
+    // correm, a sonda está estável, as camadas do gestor estão VIVAS, a
+    // grelha submete a call dela e a cena NÃO morre.
+    // =====================================================================
+    {
+        fase("FASE 0.12-Z-F4 — os 20 CENÁRIOS do dono (o ciclo de contexto "
+             "inteiro)");
+        android_app app4;
+        std::memset(&app4, 0, sizeof(app4));
+        app4.contentRect = {0, 24, 1512, 720};
+        u32 rec0 = g_contextRecreations;
+
+        // o helper DO cenário: completa o que o HOSPEDEIRO não tem (a
+        // fonte do sistema — o device tem-na e o recreateAll completa
+        // sozinho; o padrão dos testes de lifecycle da casa), roda N
+        // frames e aferra a SAÚDE inteira
+        auto saude = [&](const char* tag, bool comWe) {
+            if (!g_font.ok()) {
+                const char* paths[] = {FONT_FIXTURE};
+                g_font.loadFromPaths(paths, 1, 28.0f);
+                g_ui.setFont(&g_font);
+            }
+            if (!g_glResources.isValid("renderer")) {
+                g_glResources.recreateLayer("gpu-cube");
+                g_glResources.recreateLayer("grid");
+                g_glResources.recreateLayer("sky");
+                g_glResources.recreateLayer("particles");
+                g_glResources.recreateLayer("renderer");
+            }
+            g_recoveryCooldown = 0;
+            for (int i = 0; i < 3; ++i) {
+                frame();
+            }
+            char msg[128];
+            std::snprintf(msg, sizeof(msg), "%s: g_ready", tag);
+            check(g_ready, msg);
+            std::snprintf(msg, sizeof(msg), "%s: renderer vivo", tag);
+            check(g_glResources.isValid("renderer"), msg);
+            std::snprintf(msg, sizeof(msg), "%s: grelha viva", tag);
+            check(g_glResources.isValid("grid"), msg);
+            std::snprintf(msg, sizeof(msg), "%s: cena viva (%u tics, WE=%d)",
+                          tag, g_scene.count(), comWe ? 1 : 0);
+            check(g_scene.count() >= 1, msg);
+            std::snprintf(msg, sizeof(msg), "%s: sem cooldown pendente", tag);
+            check(g_recoveryCooldown == 0, msg);
+        };
+
+        for (int comWe = 0; comWe < 2; ++comWe) {
+            // o TIC WorldEnvironment nos cenários COM WE (a metade B)
+            if (comWe && g_scene.components().environments().size() == 0) {
+                const Handle hWe = g_scene.create("WE-F4");
+                if (Transform3D* tr =
+                        g_scene.get(hWe)->addComponent<Transform3D>()) {
+                    tr->updateWorld();
+                }
+                if (Environment* env =
+                        g_scene.get(hWe)->addComponent<Environment>()) {
+                    env->skyType = Environment::kSkyTypeProcedural;
+                    env->clampFields();
+                }
+            }
+            passo(comWe ? "grupo B — COM WorldEnvironment (10)"
+                        : "grupo A — SEM WorldEnvironment (10)");
+
+            // (1) o estado de partida (boot já correu)
+            saude(comWe ? "B1" : "A1", comWe != 0);
+
+            // (2) SAIR E VOLTAR (TERM + INIT — o contexto morre e nasce)
+            onAppCmd(&app4, APP_CMD_TERM_WINDOW);
+            onAppCmd(&app4, APP_CMD_INIT_WINDOW);
+            check(g_ready, comWe ? "B2: voltou do term (g_ready)"
+                                 : "A2: voltou do term (g_ready)");
+            saude(comWe ? "B2" : "A2", comWe != 0);
+
+            // (3) RODAR o ecrã (RESIZED — a superfície muda de tamanho)
+            onAppCmd(&app4, APP_CMD_WINDOW_RESIZED);
+            saude(comWe ? "B3" : "A3", comWe != 0);
+
+            // (4..6) ALTERNAR 3D → UI → ÁUDIO → 3D (as tabs da toolbar)
+            const int modo0 = g_editor.uiMode;
+            const bool audio0 = g_editor.audioMode;
+            g_editor.uiMode = 1;
+            g_editor.audioMode = false;
+            saude(comWe ? "B4" : "A4", comWe != 0);
+            g_editor.uiMode = 0;
+            g_editor.audioMode = true;
+            saude(comWe ? "B5" : "A5", comWe != 0);
+            g_editor.uiMode = modo0;
+            g_editor.audioMode = audio0;
+            saude(comWe ? "B6" : "A6", comWe != 0);
+
+            // (7..8) o PAINEL DE BAIXO abre e fecha (o drawer)
+            const f32 drawer0 = g_bottom.drawerH;
+            g_bottom.drawerH = safe::kDrawerMax;
+            saude(comWe ? "B7" : "A7", comWe != 0);
+            g_bottom.drawerH = drawer0;
+            saude(comWe ? "B8" : "A8", comWe != 0);
+
+            // (9) OUTRA APP PESADA (PAUSE + LOST_FOCUS + GAINED + RESUME)
+            onAppCmd(&app4, APP_CMD_PAUSE);
+            onAppCmd(&app4, APP_CMD_LOST_FOCUS);
+            onAppCmd(&app4, APP_CMD_GAINED_FOCUS);
+            onAppCmd(&app4, APP_CMD_RESUME);
+            saude(comWe ? "B9" : "A9", comWe != 0);
+
+            // (10) A PERDA SIMULADA (o botão do dono — a recuperação REAL)
+            const u32 recAntes = g_contextRecreations;
+            g_simulateLossFrames = 1;
+            frame();
+            check(g_contextRecreations == recAntes + 1,
+                  comWe ? "B10: a perda simulada recuperou (contador +1)"
+                        : "A10: a perda simulada recuperou (contador +1)");
+            saude(comWe ? "B10" : "A10", comWe != 0);
+            rec0 = g_contextRecreations;
+        }
+        check(g_contextRecreations == rec0,
+              "F4: sem recuperações pendentes no fim dos 20 cenários");
+    }
+
     // ---- sumário -----------------------------------------------------------
     std::printf("\n== C33 VIRTUAL: %d check(s), %d falha(s) ==\n", g_checks, g_failed);
     if (g_failed == 0) {

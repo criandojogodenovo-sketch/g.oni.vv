@@ -615,3 +615,46 @@ TEST(context_recovery_ciclo) {
     EXPECT(g_glResources.isValid("renderer"));
     EXPECT(g_cubeMesh.ok());
 }
+
+// ---------------------------------------------------------------------------
+// 9. A SIMULAÇÃO DA PERDA (0.12-Z F4 — o botão do dono): o flag arma 1
+// frame de sonda morta e a recuperação REAL corre o ciclo completo — o
+// contador sobe, as camadas voltam, o app continua na MESMA sessão.
+// ---------------------------------------------------------------------------
+TEST(simulate_loss_recupera) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetCtxTest();
+    glstub::fb::enabled = true;
+    javaRegistersGranted();
+    bootEditor();
+    buildCubeScene();
+    const u32 rec0 = g_contextRecreations;
+    const u32 tics0 = g_scene.count();
+
+    // o caminho do BOTÃO (o mesmo que o despacho do Settings corre) — o
+    // cooldown do teste anterior é LIMPO (o botão do dono corre no device
+    // sem cooldown pendente; o host herdou-o do pin anterior)
+    g_recoveryCooldown = 0;
+    g_simulateLossFrames = 1;
+    g_glErrorStreak = 0;
+    frame();   // a sonda vê a morte e a recuperação REAL corre
+
+    EXPECT_MSG(g_contextRecreations == rec0 + 1,
+               "0.12-Z F4: a perda simulada não recuperou (%u → %u)",
+               rec0, g_contextRecreations);
+    // o cooldown pode estar armado (a fonte falha no host) — as camadas GL
+    // recriam à mão como o device faria sozinho
+    EXPECT(g_glResources.recreateLayer("gpu-cube"));
+    EXPECT(g_glResources.recreateLayer("grid"));
+    EXPECT(g_glResources.recreateLayer("sky"));
+    EXPECT(g_glResources.recreateLayer("particles"));
+    EXPECT(g_glResources.recreateLayer("renderer"));
+    EXPECT(g_glResources.isValid("renderer"));
+    // a cena continua (o dono: o app continua a funcionar)
+    EXPECT(g_scene.count() == tics0);
+    // um frame seguinte com tudo vivo (a sonda estável de novo)
+    g_recoveryCooldown = 0;
+    frame();
+    EXPECT(g_contextRecreations == rec0 + 1);
+}

@@ -77,13 +77,13 @@ Atualizado: 2026-10-24 · vc: 124
   BlockMesh (por BLOCOS do .gmesh v3), Impostor.h (a decisão PURA),
   QuadBatch, DrawStats, ThumbPng, SkyRenderer.{h,cpp}
   (**0.12-Y D**: o CÉU PROCEDURAL — o quad fullscreen + as puras sky::;
-  **0.12-Y-F2**: o uThunderFlash — o FLASH da trovoada lido do
-  AmbientEnvironment ATIVO em STORM), ParticleRenderer.{h,cpp} +
+  **0.12-Y-F2**: o uThunderFlash — o FLASH da trovoada), ParticleRenderer.{h,cpp} +
   ParticleShader.h (**0.12-Y-F1**: as partículas GPU; **0.12-Y-F2**: o
   uWind — o vento GLOBAL do 1.º WindTIC ATIVO, a sobrecarga pura
   particlePos com vento), GlDebug.h (**0.12-Z F0**: toggles POR PASSE,
   contadores GL, estado por passe), GlResources.h (**0.12-Z F1**) e a
-  sonda/recuperação contextEnsureAlive/contextRecover no main (**F3**),
+  sonda/recuperação contextEnsureAlive/contextRecover no main (**F3**) e
+  a simulação da perda + os 20 cenários no c33 (**F4**),
   **0.12-D (DORMENTE desde a 0.12-E)**: o SdfBatch.h + o 3.º PROGRAMA
   progSdf_ (o FS replica o app/src/main/cpp/ui/Sdf.h; runs pelo flag
   `sdf`) + o ramo FOGO-ONLY + o Glass.h (o KAWASE dual) + o captureGlass

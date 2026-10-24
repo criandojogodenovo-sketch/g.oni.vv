@@ -470,6 +470,16 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
             res = kRestartRenderer;
         }
         y += settingsRowH();
+        // 0.12-Z F4 — A SIMULAÇÃO DA PERDA (o teste da recuperação SEM
+        // matar o EGL de verdade): 1 frame de sonda morta → a recuperação
+        // REAL corre o ciclo completo. SÓ com o mestre ON (é debug).
+        if (gldbg::g_masks.master &&
+            actionRow(ui, kSimulateLossId, ox, y, aw,
+                      "perda de contexto (a recuperação real corre)",
+                      "Simular")) {
+            res = kSimulateLoss;
+        }
+        y += settingsRowH();
     }
 
     // ---- DOCS (0.9.0: a secção EXISTE sem a linha — entra na 0.9.2) ----------

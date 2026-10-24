@@ -9343,3 +9343,44 @@ TEST(regress_glctx_fase3) {
                    "R-068: o ACTION_CANCEL deixou de soltar os ponteiros");
     }
 }
+
+// R-069 (0.12-Z F4) — O TESTE DA RECUPERAÇÃO NÃO MORRE —
+// regress_glctx_fase4: o botão «Simular perda» (o flag que arma 1 frame de
+// sonda morta e a recuperação REAL corre — sem atalho) e OS 20 CENÁRIOS
+// do dono no replay do device (10 SEM WE + 10 COM WE).
+TEST(regress_glctx_fase4) {
+    std::string src;
+    EXPECT(readFileText(
+        REPO_ROOT "/app/src/main/cpp/platform/main.cpp", src));
+    const std::string code = test::stripCppComments(src);
+    EXPECT_MSG(code.find("g_simulateLossFrames = 1;") != std::string::npos,
+               "R-069: o despacho da simulação sumiu");
+    EXPECT_MSG(code.find("if (g_simulateLossFrames > 0)") !=
+                   std::string::npos,
+               "R-069: a sonda deixou de consumir a simulação");
+    {
+        std::string sp;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/ui/SettingsPage.cpp", sp));
+        const std::string c = test::stripCppComments(sp);
+        EXPECT_MSG(c.find("kSimulateLossId") != std::string::npos &&
+                       c.find("gldbg::g_masks.master &&") !=
+                           std::string::npos,
+                   "R-069: o botão Simular saiu das Definições (ou deixou "
+                   "de ser debug-only)");
+    }
+    {
+        std::string c33;
+        EXPECT(readFileText(REPO_ROOT "/tests/c33_virtual.cpp", c33));
+        const std::string c = test::stripCppComments(c33);
+        EXPECT_MSG(c.find("os 20 CENÁRIOS do dono") != std::string::npos,
+                   "R-069: os 20 cenários saíram do replay");
+        EXPECT_MSG(c.find("APP_CMD_TERM_WINDOW") != std::string::npos &&
+                       c.find("APP_CMD_WINDOW_RESIZED") !=
+                           std::string::npos &&
+                       c.find("APP_CMD_PAUSE") != std::string::npos,
+                   "R-069: os eventos do lifecycle saíram dos cenários");
+        EXPECT_MSG(c.find("g_simulateLossFrames = 1;") != std::string::npos,
+                   "R-069: a perda simulada saiu dos cenários");
+    }
+}
