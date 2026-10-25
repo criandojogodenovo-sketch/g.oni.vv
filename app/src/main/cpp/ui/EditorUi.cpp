@@ -1104,9 +1104,19 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                 const TextMetrics m2 = ui.textMetrics();
                 const f32 base = ry + (kRowH - m2.block()) * 0.5f + m2.ascent;
                 const f32 nameX = iconX + theme::dp(24.0f) + theme::dp(8.0f);
-                const f32 nameW = selected
-                                      ? (eyeX - nameX - theme::dp(8.0f))
-                                      : (x + w - theme::dp(12.0f) - nameX);
+                // F4-Z2 (o nome que sumia): na SELECIONADA o nome abria o
+                // espaço das zonas 40dp (olho+⋮) — com o painel no piso
+                // (kHierMinW=140) a largura ficava ≤0 e o labelFitted
+                // desenhava NADA (o nome do TIC sumia SÓ na selecionada).
+                // O piso: se a zona dedicada não couber (≤24dp), o nome
+                // usa a linha TODA (os ícones desenham por cima no canto;
+                // o nome é o que NUNCA pode faltar).
+                const f32 fullRowNameW = (x + w - theme::dp(12.0f) - nameX);
+                const f32 selNameW = eyeX - nameX - theme::dp(8.0f);
+                const f32 nameW =
+                    selected ? (selNameW > theme::dp(24.0f) ? selNameW
+                                                            : fullRowNameW)
+                             : fullRowNameW;
                 // PASSO 2: o nome trunca POR DESENHO (a spec B dá o tip do
                 // long-press como o acesso ao nome completo) — o validador
                 // não avisa (a flag vive SÓ para a label registada)
@@ -1840,10 +1850,10 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         const InspRow& r = plan[i];
         const f32 ry = contentTop + r.y - off;   // topo da linha em ECRÃ
         switch (r.kind) {
-        case InspRow::Kind::Name:
-            ui.labelFitted(x + kPad, inspBaseline(ry, r.h, tm), tic->name.c_str(),
-                           theme::ACCENT, w - 2.0f * kPad);   // B2: ellipsis
-            break;
+        // F4-Z2 (o nome duplicado): o case Name MORREU — o cabeçalho de
+        // 44dp da FASE UI E JÁ desenha o nome (EditorUi.cpp ~1424) e a row
+        // antiga ficava por baixo com o MESMO texto 2× no painel; o push
+        // da row saiu do EditorLayout.h (o plano deixa de a empurrar).
         case InspRow::Kind::VisToggle: {
             // 0.7.0 — estado de visibilidade do TIC (mesmo estado do olho
             // da Hierarchy; TIC invisível não desenha em editor nem Play).
@@ -4736,6 +4746,13 @@ void drawLogViewer(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     const f32 th = ui.fontHeight();
     ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f,
              "LOGS (engine.log + crashes)", theme::TEXT);
+    // F4-Z2: o EXPORT vive no viewer (o chip da Consola passou a VER LOG)
+    // — o main consome logExportPressed com a verificação da existência
+    // do engine.log (o dono: «Exportar log» com verificação do ficheiro)
+    if (ui.button(6402, x + w - kPad - 96.0f - 8.0f - 104.0f, y + 4.0f,
+                  104.0f, 36.0f, "exportar")) {
+        st.logExportPressed = true;
+    }
     if (ui.button(6401, x + w - kPad - 96.0f, y + 4.0f, 96.0f, 36.0f, "fechar")) {
         st.logViewer = false;
         return;
@@ -5525,10 +5542,16 @@ void updateCameraOrbit(Camera& cam, OrbitState& st, const InputState& in,
     // F3: o PRIMEIRO toque decide o dono do gesto. Se nasce num painel
     // (Hierarchy/Inspector/toolbar) ou num controlo de toque (F4), a câmara
     // não orbita — mesmo que o dedo depois atravessasse o viewport.
+    // F4-Z2 (a câmara presa): o `break` no PRIMEIRO pointer reclamado
+    // ABANDONAVA o scan — um dedo num controlo + o SEGUNDO dentro do
+    // viewport deixavam gestureInView=false PARA O GESTO INTEIRO (a
+    // câmara morta até todos soltarem). O pointer reclamado agora SAI
+    // só dele (`continue`): cada dedo é julgado À PARTE — o gesto do
+    // controlo continua reclamado, um dedo LIVRE dentro do view orbita.
     if (!st.gestureInView) {
         for (u32 s = 0; s < kMaxPointerSlots; ++s) {
             if (!in.pressed(s)) continue;
-            if (claimedMask & (1u << s)) break;   // nasceu num controlo
+            if (claimedMask & (1u << s)) continue;   // F4-Z2: não veta os outros
             f32 x, y;
             in.pos(s, x, y);
             if (x >= view.x && x < view.x + view.w && y >= view.y && y < view.y + view.h) {

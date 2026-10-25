@@ -134,6 +134,7 @@ enum Result {
     kRunBench,         // 0.9.6 (G6): correr os benchmarks (R-017)
     kCopyBench,        // 0.9.6 (G6): copiar o relatório (bloco de 9 linhas)
     kExportLayout,     // 0.9.6.5 (GRUPO B): exportar o layout (PNG+JSON)
+    kBlackBox,         // F4-Z2: a caixa negra (snapshot .txt+PNG)
     kAuditScreen,      // 0.9.6.5 (GRUPO B): auditoria do ecrã (validador+log)
     // 0.12-Z F0 — os toggles do debug de passes (o main aplica em gldbg)
     kDbgMaster,

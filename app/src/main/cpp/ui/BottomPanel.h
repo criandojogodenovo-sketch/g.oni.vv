@@ -121,6 +121,12 @@ struct BottomState {
     // 0.9.6.10: a consola da imagem 1 — TABS Consola/Logs/Erros/Avisos
     // (0=tudo · 1=info · 2=erros · 3=avisos; o filtro de chips antigo morre)
     int  consoleTab = 0;
+    // F4-Z2 (o ponto vermelho honesto): o ACK do erro — a Consola À VISTA
+    // fotografia elog::errCount(); o ponto acende de novo SÓ com um E/
+    // NOVO depois do ack. consolaOpened = o Consola já foi vista nesta
+    // sessão (o arranque com E/ herdado do log antigo conta como não lida).
+    bool               consolaOpened = false;
+    unsigned long long errAck        = 0;
     // drag da pega (redimensionar o drawer — spec E)
     bool dragActive = false;
     f32  dragStartY = 0.0f;
@@ -225,7 +231,14 @@ Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st);
 // bar de 24dp foi REMOVIDA — a versão/commit estão em Settings › Sobre;
 // StatusBarData/drawStatusBar apagados pela spec)
 struct Actions {
-    bool exportPressed = false;         // [Export] da consola
+    bool exportPressed = false;         // [Export] da consola (legado — o
+                                        // chip passou a VER LOG na F4-Z2;
+                                        // o Export vive no viewer com a
+                                        // verificação do ficheiro)
+    bool viewLogPressed = false;        // F4-Z2: o chip da Consola ABRE o
+                                        // viewer (não exporta — o dono:
+                                        // «Ver log» abre, «Exportar log»
+                                        // verifica o ficheiro e exporta)
     int  filePick = 0;                  // 1.. = card i escolhido (aplicar)
     int  filePickKind = 0;              // 1 mesh, 2 tex, 5 áudio (applyAssetPick)
     bool commandPressed = false;        // 0.9.6.10: o campo de comando (o

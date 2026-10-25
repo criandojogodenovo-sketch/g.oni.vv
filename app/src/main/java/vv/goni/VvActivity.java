@@ -640,6 +640,52 @@ public class VvActivity extends NativeActivity {
         }
     }
 
+    // F4-Z2 — A CAIXA NEGRA: escreve blackbox-<ts>.txt (text/plain) +
+    // blackbox-<ts>.png (image/png) em Downloads/<relPath>/ via MediaStore
+    // (API 29+, SEM permissão — o MESMO caminho do export de logs). Chamado
+    // POR JNI do thread de jobs. Devolve o nº de ficheiros escritos (0..2);
+    // negativo = falha (-1 excepção, -2 API < 29, -3 sem conteúdo).
+    int exportBlackBoxToDownloads(String relPath, String txt, byte[] png) {
+        try {
+            if (Build.VERSION.SDK_INT < 29) return -2;
+            if (relPath == null || relPath.isEmpty()) return -1;
+            if ((txt == null || txt.isEmpty()) || png == null || png.length == 0)
+                return -3;
+            long ts = System.currentTimeMillis() / 1000L;
+            int count = 0;
+            count += writeDownload(relPath, "blackbox-" + ts + ".txt",
+                                   "text/plain", txt.getBytes("UTF-8"));
+            count += writeDownload(relPath, "blackbox-" + ts + ".png",
+                                   "image/png", png);
+            return count;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    private int writeDownload(String relPath, String name, String mime,
+                              byte[] data) {
+        try {
+            deleteDownload(relPath, name);
+            ContentValues cv = new ContentValues();
+            cv.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+            cv.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+            cv.put(MediaStore.MediaColumns.RELATIVE_PATH, relPath);
+            Uri uri = getContentResolver().insert(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+            if (uri == null) return 0;
+            java.io.OutputStream os =
+                    getContentResolver().openOutputStream(uri);
+            if (os == null) return 0;
+            os.write(data);
+            os.flush();
+            os.close();
+            return 1;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
     private void deleteDownload(String relPath, String name) {
         try {
             String sel = MediaStore.MediaColumns.RELATIVE_PATH + "=? AND " +

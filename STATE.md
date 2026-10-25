@@ -1,8 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-25 · vc: 135 · Último commit: este (a 0.12-Z2 F1-R —
-o contexto GL por fuzzing em 1500 ciclos, FUNDO com a F1BIS e rebaseado
-sobre a F3; o RELATORIO-0.12-Z2-F1.md §F1-R);
+Atualizado: 2026-10-25 · vc: 136 · Último commit: este (a 0.12-Z2 F4 —
+os bugs 4.2, os P2 herdados e a CAIXA NEGRA; o
+RELATORIO-0.12-Z2-F4.md);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -10,6 +10,28 @@ sobre a F3; o RELATORIO-0.12-Z2-F1.md §F1-R);
 
 ## §1 Onde estamos
 
+- **Campanha 0.12-Z2 — F4 FECHADA (vc 136)**. OS 9 BUGS 4.2 mortos (o
+  relatório tem a tabela com ficheiro:linha): o «Ver log» ABRE o viewer
+  e o export desceu para ele COM a verificação do ficheiro; o ponto
+  vermelho honesto (o probe() nos opcionais settings.goni/overrides.goni
+  + o ACK errCount() ao abrir a Consola — EngineLog ganha
+  lineCount/errCount); o vp3d cala no arrasto; o RSS=-1 cru morre («não
+  medido»); o relógio do thumb DIVIDIDO (cpu/io — o orçamento 50ms é de
+  CPU); o nome da hierarquia com PISO (não sumia mais); a row Name
+  DUPLICADA do Inspector morta (plano+contagem+desenho em sincronia,
+  pins atualizados com a mutação colada); o chip ⋮ morto (duplicado do
+  Menu); o latch da câmara (break→continue — um dedo num controlo não
+  veta os outros). OS P2 HERDADOS: os contadores gldbg honestos
+  (nascimento real + onDestroyed nos 3; o pin Buffer 5→3); o
+  glassInvalidate ligado ao contrato (recuperação + câmara/rect); o RAII
+  + o varredor de órfãos nos pesados (TmpDirRaii + cleanStaleHeavyTmp —
+  o r039 PROVADO com o limite físico do disco); o ENOSPC limpo (o crash
+  é a corrida suspensa por ordem do dono). A CAIXA NEGRA: .txt+PNG no
+  GLES real (raster FASE C-BB 9 checks), os gatilhos AUTO (recuperação +
+  câmara inválida), o botão em Settings›Diagnóstico, Downloads/
+  GOneVV/blackbox/ no device. AS INFRAESTRUTURAS: GONI_SAN/GONI_OBJ_DIR
+  no build_tests.py (ASan/UBSan) + o aprendido do ABI misturado (rm dos
+  .o a cada mudança de header — o fix estrutural fica para a F5).
 - **Campanha 0.12-Z2 — F1-R FECHADA (vc 134)**. A F1 completa (o rework
   da F1-original, rebaseado SOBRE a F2 e FUNDO com a F1BIS): a PROVA POR
   FUZZING — 1500 ciclos (1200 TERM/INIT reais + 300 contextRecover da

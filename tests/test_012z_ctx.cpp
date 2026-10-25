@@ -240,11 +240,13 @@ TEST(gldebug_counters_ciclo) {
     EXPECT(nearEqF(static_cast<f32>(gldbg::createdOf(gldbg::Kind::Program)),
                    4.0f, 0.5f));
     // vao: renderer 2 + grid 1 (o lit não tem VAO) | buf: renderer 2 +
-    // lit 2 (UBOs) + grid 1
+    // grid 1 — F4-Z2: o lit 2 (UBOs) SAIU da conta da init (os UBOs
+    // contam no NASCIMENTO real, setBones/setInstances; este pin não
+    // skinha nem instancia) — 5 → 3
     EXPECT(nearEqF(static_cast<f32>(gldbg::createdOf(gldbg::Kind::Vao)),
                    3.0f, 0.5f));
     EXPECT(nearEqF(static_cast<f32>(gldbg::createdOf(gldbg::Kind::Buffer)),
-                   5.0f, 0.5f));
+                   3.0f, 0.5f));
     EXPECT(nearEqF(static_cast<f32>(gldbg::createdOf(gldbg::Kind::Texture)),
                    2.0f, 0.5f));
 

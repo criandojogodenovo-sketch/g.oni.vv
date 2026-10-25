@@ -95,6 +95,8 @@ TEST(prova_final_010m_dragao_o_caminho_inteiro_com_a_tabela) {
         // parede do 65 535 — o diagnóstico que ABRIU a campanha) ------
         const std::string dir =
             std::string("/tmp/goni_p6_") + std::to_string(int(::getpid()));
+        const medicoes::TmpDirRaii tmpGuard{dir};   // F4-Z2: RAII em TODOS
+        medicoes::cleanStaleHeavyTmp();             // os transitórios de
         const std::string src = dir + "/fonte.glb";
         u64 glbBytes = 0;
         rmRf(dir);   // resto de corrida anterior (a lição w010)

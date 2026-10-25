@@ -53,9 +53,9 @@ GLuint compileShader(GLenum type, const char* src) {
 
 bool ParticleRenderer::init() {
     destroy();
-    gldbg::onCreated(gldbg::Kind::Program, 1);   // 0.12-Z F0
-    gldbg::onCreated(gldbg::Kind::Vao, 1);
-    gldbg::onCreated(gldbg::Kind::Buffer, 1);
+    // F4-Z2 (os contadores honestos — F1 §F1.15): a contagem passa para o
+    // NASCIMENTO real (2 buffers — corner + seeds; o «1 de 2» morre) e só
+    // depois de a init chegar ao fim (a falha de shader/link não conta)
     const GLuint vs = compileShader(GL_VERTEX_SHADER, fx::kVertexSrc);
     const GLuint fs = compileShader(GL_FRAGMENT_SHADER, fx::kFragmentSrc);
     if (!vs || !fs) {
@@ -116,6 +116,10 @@ bool ParticleRenderer::init() {
     glVertexAttribDivisor(1, 1);   // 1 seed por INSTÂNCIA (o GLES 3.0 core)
     glBindVertexArray(0);
     bufferCount_ = kSeedCapacity;
+    // F4-Z2: o NASCIMENTO real — Program 1, Vao 1, Buffer 2 (corner+seeds)
+    gldbg::onCreated(gldbg::Kind::Program, 1);
+    gldbg::onCreated(gldbg::Kind::Vao, 1);
+    gldbg::onCreated(gldbg::Kind::Buffer, 2);
     LOGI("ParticleRenderer: %u seeds no buffer (1 draw call por emissor, "
          "a física no VS)", kSeedCapacity);
     return true;
@@ -128,10 +132,14 @@ void ParticleRenderer::destroy() {
     }
     texPath_.clear();
     texFailed_ = false;
-    if (vboCorner_) { glDeleteBuffers(1, &vboCorner_); vboCorner_ = 0; }
-    if (vboSeeds_) { glDeleteBuffers(1, &vboSeeds_); vboSeeds_ = 0; }
-    if (vao_) { glDeleteVertexArrays(1, &vao_); vao_ = 0; }
-    if (prog_) { glDeleteProgram(prog_); prog_ = 0; }
+    if (vboCorner_) { glDeleteBuffers(1, &vboCorner_); vboCorner_ = 0;
+                      gldbg::onDestroyed(gldbg::Kind::Buffer, 1); }
+    if (vboSeeds_) { glDeleteBuffers(1, &vboSeeds_); vboSeeds_ = 0;
+                     gldbg::onDestroyed(gldbg::Kind::Buffer, 1); }
+    if (vao_) { glDeleteVertexArrays(1, &vao_); vao_ = 0;
+                gldbg::onDestroyed(gldbg::Kind::Vao, 1); }
+    if (prog_) { glDeleteProgram(prog_); prog_ = 0;
+                 gldbg::onDestroyed(gldbg::Kind::Program, 1); }
     locVP_ = locRight_ = locUp_ = locPos_ = locVel_ = locGrav_ = -1;
     locWind_ = -1;   // 0.12-Y-F2
     locSpawnScale_ = -1;   // 0.12-Z2 F3

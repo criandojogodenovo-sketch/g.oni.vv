@@ -204,9 +204,9 @@ void SkyRenderer::use() const {
 
 bool SkyRenderer::init() {
     destroy();
-    gldbg::onCreated(gldbg::Kind::Program, 1);   // 0.12-Z F0
-    gldbg::onCreated(gldbg::Kind::Vao, 1);
-    gldbg::onCreated(gldbg::Kind::Buffer, 1);
+    // F4-Z2 (os contadores honestos — F1 §F1.15): o onCreated passou para
+    // DEPOIS da criação — a init podia FALHAR a meio (shader/link) e os
+    // contadores já tinham contado objetos que nunca nasceram
     const GLuint vs = compileShader(GL_VERTEX_SHADER, kVsSrc);
     const GLuint fs = compileShader(GL_FRAGMENT_SHADER, kFsSrc);
     if (!vs || !fs) {
@@ -254,6 +254,10 @@ bool SkyRenderer::init() {
     glBindVertexArray(0);
 
     vertexCount_ = 4;
+    // F4-Z2: a CONTAGEM no nascimento real (tudo criado — a init chegou)
+    gldbg::onCreated(gldbg::Kind::Program, 1);
+    gldbg::onCreated(gldbg::Kind::Vao, 1);
+    gldbg::onCreated(gldbg::Kind::Buffer, 1);
     LOGI("SkyRenderer: pronto (quad fullscreen + céu procedural com nuvens, "
          "%u vértices)",
          vertexCount_);
@@ -261,9 +265,14 @@ bool SkyRenderer::init() {
 }
 
 void SkyRenderer::destroy() {
-    if (vbo_)  { glDeleteBuffers(1, &vbo_); vbo_ = 0; }
-    if (vao_)  { glDeleteVertexArrays(1, &vao_); vao_ = 0; }
-    if (prog_) { glDeleteProgram(prog_); prog_ = 0; }
+    // F4-Z2: a MORTE também conta (o par do inventário — faltava o
+    // onDestroyed aqui; o censo da F1 precisava dos 2 lados)
+    if (vbo_)  { glDeleteBuffers(1, &vbo_); vbo_ = 0;
+                 gldbg::onDestroyed(gldbg::Kind::Buffer, 1); }
+    if (vao_)  { glDeleteVertexArrays(1, &vao_); vao_ = 0;
+                 gldbg::onDestroyed(gldbg::Kind::Vao, 1); }
+    if (prog_) { glDeleteProgram(prog_); prog_ = 0;
+                 gldbg::onDestroyed(gldbg::Kind::Program, 1); }
     locRight_ = locUp_ = locFwd_ = locAspect_ = locTanF_ = -1;
     locTime_ = locSpeed_ = locCoverage_ = -1;
     locHeight_ = locStars_ = -1;

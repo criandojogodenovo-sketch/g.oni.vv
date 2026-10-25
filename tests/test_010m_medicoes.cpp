@@ -158,6 +158,8 @@ TEST(sentinela_r039_50m_verts_ram_pico_512mb) {
         // ---- FILHO: gerar (streaming) → reset do pico → import → medir
         const std::string dir =
             std::string("/tmp/goni_r039_") + std::to_string(int(::getpid()));
+        const medicoes::TmpDirRaii tmpGuard{dir};   // F4-Z2: RAII em TODOS
+        medicoes::cleanStaleHeavyTmp();             // os transitórios de
         const std::string src = dir + "/fonte.glb";
         u64 glbBytes = 0;
         rmRf(dir);   // resto de corrida anterior — nunca (lição w010)

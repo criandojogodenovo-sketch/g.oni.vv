@@ -52,6 +52,8 @@
 #include "voni/VoniDocs.h"
 #include "platform/main.cpp"
 
+#include "platform/BlackBox.h"  // F4-Z2: a caixa negra
+#include <filesystem>
 #include "render/ThumbPng.h"   // encodePngRgba (o encoder PNG da engine)
 #include "render/Cube.h"       // makeCube (a geometria do TIC Cubo)
 
@@ -1757,6 +1759,83 @@ int main(int argc, char** argv) {
                   "a CENA sobrevive à perda de contexto");
         }
         prova("B4 capturado: frame após perda de contexto real (EGL destruído)");
+    }
+
+    // ======================================================================
+    // FASE C-BB — A CAIXA NEGRA (F4-Z2): o snapshot .txt + PNG no GLES real
+    // ======================================================================
+    fase("FASE C-BB — a caixa negra");
+    {
+        blackbox::arm("prova raster_z2");
+        frame();          // o PONTO SEGURO do frame captura o backbuffer
+        frame();          // o reaper junta o worker no frame seguinte
+        check(blackbox::waitIdle(10000), "o job da caixa negra termina");
+        // o ficheiro nasce no dir de logs (elog) ou no fallback /tmp
+        std::vector<std::string> bases;
+        const char* d = elog::dir();
+        if (d && d[0]) bases.push_back(std::string(d));
+        bases.push_back("/tmp/goni_blackbox");
+        std::string txtPath, pngPath;
+        for (const std::string& b : bases) {
+            const std::string pat1 = b + "/blackbox-";
+            for (const std::string& cand : {std::string(), std::string()}) {
+                (void)cand;
+            }
+        }
+        // procura simples: lista os 2 dirs por ls via std::filesystem
+        for (const std::string& b : bases) {
+            if (!txtPath.empty()) break;
+            std::error_code ec;
+            std::filesystem::directory_iterator it(b, ec), end;
+            for (; !ec && it != end; it.increment(ec)) {
+                const std::string n = it->path().filename().string();
+                if (n.rfind("blackbox-", 0) == 0 &&
+                    n.size() > 4 && n.substr(n.size() - 4) == ".txt" &&
+                    txtPath.empty()) {
+                    txtPath = it->path().string();
+                    pngPath = txtPath.substr(0, txtPath.size() - 4) + ".png";
+                }
+            }
+        }
+        check(!txtPath.empty(), "o .txt da caixa negra existe");
+        if (!txtPath.empty()) {
+            std::string txt;
+            FILE* f = std::fopen(txtPath.c_str(), "rb");
+            if (f) {
+                char buf[65536];
+                const size_t n = std::fread(buf, 1, sizeof(buf) - 1, f);
+                buf[n] = 0;
+                txt = buf;
+                std::fclose(f);
+            }
+            check(txt.find("== CAIXA NEGRA G.ONE VV ==") != std::string::npos,
+                  "o .txt tem o cabeçalho");
+            check(txt.find("gatilho: prova raster_z2") != std::string::npos,
+                  "o .txt tem o gatilho");
+            check(txt.find("GL_RENDERER: llvmpipe") != std::string::npos,
+                  "o .txt tem o renderer REAL");
+            check(txt.find("contexto:") != std::string::npos &&
+                      txt.find("camara:") != std::string::npos &&
+                      txt.find("recursos GL") != std::string::npos &&
+                      txt.find("ULTIMAS 200 LINHAS") != std::string::npos,
+                  "o .txt tem as secções do contrato");
+        }
+        std::FILE* pf = pngPath.empty()
+                            ? nullptr
+                            : std::fopen(pngPath.c_str(), "rb");
+        check(pf != nullptr, "o .png da caixa negra existe");
+        if (pf) {
+            std::fseek(pf, 0, SEEK_END);
+            const long sz = std::ftell(pf);
+            std::fclose(pf);
+            check(sz > 1024, "o PNG tem conteúdo (acima de 1KB)");
+        }
+        std::printf("    [BB] txt=%s png=%s\n", txtPath.c_str(),
+                    pngPath.c_str());
+        // F4-Z2: o join do worker (o reap corre no frame — sem ESTE frame
+        // o std::thread morria joinable no fim = terminate)
+        frame();   // o reap do frame junta o worker (nunca joinable ao sair)
+        check(blackbox::waitIdle(1000), "o worker da caixa juntado (idle)");
     }
 
     // ======================================================================

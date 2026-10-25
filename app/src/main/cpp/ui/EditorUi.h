@@ -110,6 +110,9 @@ struct EditorState {
     bool   importMenu = false;             // overlay IMPORT (Download/Documents)
     bool   logViewer = false;              // viewer de logs visível
     bool   logViewerJustOpened = false;    // 1 frame: auto-scroll p/ o fundo
+    bool   logExportPressed = false;       // F4-Z2: «exportar» no viewer (o
+                                           // main verifica o ficheiro e
+                                           // copia para os Downloads)
 
     // 0.8.12 — GUARDA DOS PICKERS: o Inspector seta quando um toque em
     // linha de picker foi BLOQUEADO por falta de alvo válido (sem TIC com

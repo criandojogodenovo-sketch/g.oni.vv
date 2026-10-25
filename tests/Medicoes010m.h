@@ -452,4 +452,49 @@ inline void childCleanup(const std::string& dir) {
     rmRf(dir);
 }
 
+// F4-Z2 (o /tmp dos testes pesados em run única — herdado da F1 §F1-R.1):
+// o guard RAII deixa o dir do teste MORRER com o escopo (o childCleanup
+// manual saltava-se num _exit esquecido; o RAII corre em TODOS os
+// caminhos de retorno do filho).
+struct TmpDirRaii {
+    std::string dir;
+    explicit TmpDirRaii(std::string d) : dir(std::move(d)) {}
+    ~TmpDirRaii() {
+        if (!dir.empty()) rmRf(dir);
+    }
+    TmpDirRaii(const TmpDirRaii&) = delete;
+    TmpDirRaii& operator=(const TmpDirRaii&) = delete;
+};
+
+// F4-Z2: a limpeza ENTRE testes pesados — os transitórios de corridas
+// ANTERIORES (goni_r039_* / goni_p6_* / goni_010m_* que um crash deixou)
+// morrem ANTES do próximo teste pesado nascer; o estouro de /tmp em run
+// única (errno 28) não se acumula. O dir do PRÓPRIO pid não se toca.
+inline void cleanStaleHeavyTmp() {
+    DIR* d = ::opendir("/tmp");
+    if (!d) return;
+    static const char* kPrefixes[] = {"goni_r039_", "goni_p6_",
+                                      "goni_010m_"};
+    const std::string self =
+        std::to_string(static_cast<int>(::getpid()));
+    while (struct dirent* e = ::readdir(d)) {
+        const std::string name(e->d_name);
+        bool hit = false;
+        for (const char* pre : kPrefixes) {
+            if (name.rfind(pre, 0) == 0) {
+                hit = true;
+                break;
+            }
+        }
+        if (!hit) continue;
+        if (name.size() > 0 &&
+            name.compare(name.size() - self.size(), self.size(), self) ==
+                0) {
+            continue;   // o nosso dir nasce DEPOIS — nunca existiria, mas
+        }
+        rmRf(std::string("/tmp/") + name);
+    }
+    ::closedir(d);
+}
+
 } // namespace medicoes

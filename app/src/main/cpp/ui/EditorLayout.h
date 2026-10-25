@@ -555,7 +555,9 @@ inline f32 inspThumbsH() {
 
 inline u32 inspectorRowCount(const InspProfile& p, bool selectable,
                              u32 collapsed) {
-    u32 n = 2;                                          // nome + visivel
+    // F4-Z2 (o nome duplicado): a row Name saiu do plano — a contagem
+    // acompanha (1 = só a visível; o nome vive no cabeçalho de 44dp)
+    u32 n = 1;                                          // visivel
     // ---- TRANSFORM (bit0): cabeçalho + 3 linhas Pos/Rot/Escala ----------
     n += 1;
     if (!(collapsed & kInspBitTransform)) {
@@ -678,7 +680,10 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
         y += h;   // ← o ÚNICO avanço de cursor: y += altura_linha
     };
 
-    push(InspRow::Kind::Name, textH, 0);
+    // F4-Z2 (o nome duplicado): a row Name SAIU do plano — o cabeçalho
+    // de 44dp (FASE UI E) já mostra nome+tipo; a row antiga repetia o
+    // nome 2× no painel. O case de desenho foi removido em sincronia
+    // (EditorUi.cpp); o enum Kind::Name fica (compat de leitura).
     push(InspRow::Kind::VisToggle, btnH, kInspectorVis);
     // ---- TRANSFORM (spec C): cabeçalho + 3 linhas X/Y/Z + R -------------
     push(InspRow::Kind::Section, secH, kInspSectionBase + 0, kInspBitTransform);

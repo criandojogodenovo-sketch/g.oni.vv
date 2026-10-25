@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CML = os.path.join(REPO, "tests", "CMakeLists.txt")
 OBJ = os.path.join(REPO, "tests", "build-obj")
+OBJ = os.environ.get("GONI_OBJ_DIR", OBJ)  # F4-Z2: o dir do ASan separado
 BIN = os.path.join(OBJ, "test_core")
 
 def src_list():
@@ -47,6 +48,7 @@ def compile_one(src):
     if os.path.exists(obj) and os.path.getmtime(obj) >= os.path.getmtime(src):
         return obj, None
     cmd = ["g++-14", "-std=c++17", "-O1", "-DNDEBUG",
+           *os.environ.get("GONI_SAN", "").split(),  # F4-Z2: ASan/UBSan
            f"-DREPO_ROOT=\"{REPO}\"",
            f"-DFONT_FIXTURE=\"{REPO}/tests/fixtures/fonts/LiberationSans-Regular.ttf\"",
            f"-DFIXTURE_DIR=\"{REPO}/tests/fixtures\"",
@@ -81,7 +83,9 @@ def main():
     for s in srcs:
         rel = s[len(REPO):].lstrip(os.sep).replace(os.sep, "_")
         objs.append(os.path.join(OBJ, rel + ".o"))
-    cmd = ["g++-14", "-std=c++17", "-O1", "-o", BIN] + objs + ["-lz", "-lpthread"]
+    cmd = ["g++-14", "-std=c++17", "-O1", "-o", BIN] + objs \
+        + ["-lz", "-lpthread"] \
+        + os.environ.get("GONI_SAN", "").split()  # F4-Z2: runtime ASan/UBSan
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         print("LINK FAIL:\n" + r.stderr[-6000:])

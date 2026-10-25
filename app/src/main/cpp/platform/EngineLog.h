@@ -59,6 +59,14 @@ void error(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 // level = 'I' | 'W' | 'E'. Escreve "<ts> <level>/GONI: <line>\n".
 void writeLine(char level, const char* line);
 
+// F4-Z2 (o ponto vermelho honesto): contadores MONÓTONOS de linhas —
+// lineCount() sobe em CADA linha lógica (mesmo sem ficheiro ativo);
+// errCount() sobe só nas 'E/'. O ponto vermelho dos Painéis compara
+// errCount() com o ack do último abrir da Consola — um E/ novo acende,
+// o abrir apaga; o ponto deixa de ser «sempre aceso».
+unsigned long long lineCount();
+unsigned long long errCount();
+
 // ---- F5.2: LOG VIEWER in-app (Settings → "Ver logs") -----------------------
 // Lê as ÚLTIMAS maxLines linhas do engine.log (rotação incluída: ativo, e
 // se faltarem linhas continua nos backups .1/.2 — o histórico recente é o

@@ -9,6 +9,7 @@
 #include "platform/EngineLog.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cstdarg>
 #include <cstdio>
@@ -156,8 +157,24 @@ const char* androidFallbackDir() {
 #endif
 }
 
+// F4-Z2: os contadores do ponto vermelho (ver EngineLog.h) — ANTES do
+// retorno sem ficheiro: contam linhas LÓGICAS, não linhas escritas.
+static std::atomic<unsigned long long> g_lineCount{0};
+static std::atomic<unsigned long long> g_errCount{0};
+
+unsigned long long lineCount() {
+    return g_lineCount.load(std::memory_order_relaxed);
+}
+unsigned long long errCount() {
+    return g_errCount.load(std::memory_order_relaxed);
+}
+
 void writeLine(char level, const char* line) {
     androidWrite(level, line);
+    g_lineCount.fetch_add(1, std::memory_order_relaxed);
+    if (level == 'E') {
+        g_errCount.fetch_add(1, std::memory_order_relaxed);
+    }
     std::lock_guard<std::mutex> lk(g_mu);
     if (g_fd < 0) {
         return;

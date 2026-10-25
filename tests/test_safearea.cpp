@@ -138,7 +138,9 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     // — a ordem do dono (mais ar entre os campos) — 1234 → 1246
     // FASE UI C: o piso das linhas sobe com a kRowH do dono (40) —
     // 19 linhas de piso × +4dp = 1246 → 1322
-    EXPECT(nearEqF(contentH, 1322.0f));
+    // F4-Z2: a row Name saiu do plano (o nome vive no cabeçalho 44dp)
+    // — UMA linha de piso 40 menos: 1322 → 1282
+    EXPECT(nearEqF(contentH, 1282.0f));
 
     // DEPOIS: painel dentro do contentRect [0,24,·,628] (status 24 + nav 92)
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);

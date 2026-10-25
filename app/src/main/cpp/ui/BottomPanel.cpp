@@ -8,6 +8,7 @@
 // colorida por nível (parse do prefixo do engine.log: I/W/E), cards 96dp
 // com ícone de tipo (cubo/lupa→imageQuad/speaker/pasta p/ cenas).
 #include "ui/BottomPanel.h"
+#include "../platform/EngineLog.h"
 #include "ui/EditorUi.h"
 #include "ui/Timeline.h"
 #include "ui/UiContext.h"
@@ -202,6 +203,13 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
             break;
         }
     }
+    // F4-Z2 (o ponto vermelho honesto): o ponto é «erro NÃO LIDO» —
+    // um E/ no tail acende; a Consola À VISTA fotografa o errCount() no
+    // ack (em baixo) e só um E/ NOVO volta a acender. O antigo «sempre
+    // aceso» nasceu do E/ espúrio dos ficheiros OPCIONAIS (cura no
+    // SafStorage/main: probe antes do read) + nunca houve ack.
+    const bool dotErr = hasErr && (!bs.consolaOpened ||
+                                   elog::errCount() > bs.errAck);
 
     // ---- fundo da barra inferior fina (32dp) ----
     ui.panel(L.tabBar.x, L.tabBar.y, L.tabBar.w, L.tabBar.h, theme::kTheme.bg);
@@ -248,7 +256,7 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
                         theme::dp(2.0f),
                         open ? theme::kTheme.accent : theme::kTheme.text2);
         }
-        if (hasErr) {
+        if (dotErr) {
             // O PONTO VERMELHO no botão (6dp danger no canto do chip)
             ui.panelRounded(chipX + chipW - theme::dp(5.0f),
                             chipY - theme::dp(2.0f), theme::dp(6.0f),
@@ -375,6 +383,12 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
         for (int i = 0; i < 4; ++i) {
             const UiRect& r = L.tab[i];
             const bool active = bs.bottomTab == i + 1;
+            if (active && i == 2) {
+                // F4-Z2: a Consola ESTÁ À VISTA — o ack fotografia o
+                // errCount() deste frame (um E/ depois disto acende o ponto)
+                bs.consolaOpened = true;
+                bs.errAck = elog::errCount();
+            }
             ui.auditRowFloorNext(layout::kFieldFloorDp);
             const bool pressed = ui.widgetHit(tabs[i].id, r.x, r.y, r.w, r.h);
             if (ui.widgetActive(tabs[i].id)) {
@@ -385,7 +399,7 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
             const f32 gap = theme::dp(6.0f);
             // o PONTO VERMELHO da Consola (o espaço conta no centrado)
             const f32 dotW =
-                (i == 2 && hasErr) ? theme::dp(6.0f) + theme::dp(4.0f) : 0.0f;
+                (i == 2 && dotErr) ? theme::dp(6.0f) + theme::dp(4.0f) : 0.0f;
             const f32 x0 = r.x + (r.w - (s + gap + wordW + dotW)) * 0.5f;
             icons::drawIcon(ui, tabs[i].ic, x0,
                             r.y + (r.h - s) * 0.5f, s,
@@ -398,7 +412,7 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
                                       : theme::kTheme.text2,
                                theme::fontScale(theme::kFontCaption), 0);
             }
-            if (i == 2 && hasErr) {
+            if (i == 2 && dotErr) {
                 // O PONTO VERMELHO na aba Consola (a ordem literal)
                 ui.panelRounded(x0 + s + gap + wordW + theme::dp(4.0f),
                                 r.y + r.h * 0.5f - theme::dp(3.0f),
@@ -850,16 +864,20 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
                                    al, theme::kTheme.text2, aw);
                 }
                 ui.auditRowFloorNext(layout::kHeadFloorDp);
+                // F4-Z2 (o «Ver log» que exportava): o chip da Consola
+                // ABRE o viewer in-app — o export desceu para o viewer
+                // (botão «exportar» com a verificação da existência do
+                // ficheiro); o dono lê o log SEM depender do MediaStore
                 if (ui.widgetHit(kExportId, ax0 + aw + theme::dp(8.0f), tabY,
                                  aw, tabH)) {
-                    a.exportPressed = true;
+                    a.viewLogPressed = true;
                 }
                 if (ui.hasFont()) {
                     ui.labelFitted(
                         ax0 + aw + theme::dp(8.0f) +
-                            (aw - ui.fontWidth("export")) * 0.5f,
+                            (aw - ui.fontWidth("ver log")) * 0.5f,
                         tabY + (tabH - tmText.block()) * 0.5f + tmText.ascent,
-                        "export", theme::kTheme.text1, aw);
+                        "ver log", theme::kTheme.text1, aw);
                 }
             }
             ui.panel(content.x + theme::dp(16.0f),

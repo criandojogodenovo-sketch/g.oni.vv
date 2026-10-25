@@ -185,8 +185,10 @@ GLuint compileShader(GLenum type, const char* src) {
 
 bool LitMaterial::init() {
     destroy();
-    gldbg::onCreated(gldbg::Kind::Program, 1);   // 0.12-Z F0
-    gldbg::onCreated(gldbg::Kind::Buffer, 2);    // os 2 UBOs (bones+inst)
+    // F4-Z2 (os contadores honestos — F1 §F1.15): o Program conta no
+    // NASCIMENTO real (fim da init); os 2 UBOs NÃO contam aqui — nascem a
+    // pedido (setBones/setInstances), o «adiantado» contava 2 buffers que
+    // podiam nunca existir
     const GLuint vs = compileShader(GL_VERTEX_SHADER, kVsSrc);
     const GLuint fs = compileShader(GL_FRAGMENT_SHADER, kFsSrc);
     if (!vs || !fs) {
@@ -259,6 +261,8 @@ bool LitMaterial::init() {
          "o albedo slot 0) + uTint "
          "+ skin (UBO Bones[128]) + instancing (UBO Instances[64]) + props "
          "do material glTF (alpha/factors/twoSided/uvTransform) pronto");
+    // F4-Z2: o Program conta quando a init chegou AO FIM (tudo criado)
+    gldbg::onCreated(gldbg::Kind::Program, 1);
     return true;
 }
 
@@ -347,6 +351,7 @@ void LitMaterial::setBones(const Mat4* bones, u32 count) const {
     const u32 n = count < kMaxBones ? count : kMaxBones;
     if (uboBones_ == 0) {
         glGenBuffers(1, &uboBones_);
+        gldbg::onCreated(gldbg::Kind::Buffer, 1);   // F4-Z2: no nascimento
         glBindBuffer(GL_UNIFORM_BUFFER, uboBones_);
         glBufferData(GL_UNIFORM_BUFFER,
                      static_cast<GLintptr>(kMaxBones * 64), nullptr,
@@ -381,6 +386,7 @@ void LitMaterial::setInstances(const Mat4* instances, u32 count) const {
     const u32 n = count < kMaxInstances ? count : kMaxInstances;
     if (uboInst_ == 0) {
         glGenBuffers(1, &uboInst_);
+        gldbg::onCreated(gldbg::Kind::Buffer, 1);   // F4-Z2: no nascimento
         glBindBuffer(GL_UNIFORM_BUFFER, uboInst_);
         glBufferData(GL_UNIFORM_BUFFER,
                      static_cast<GLintptr>(kMaxInstances * 64), nullptr,

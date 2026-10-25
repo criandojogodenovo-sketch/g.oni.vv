@@ -196,7 +196,9 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     // 0.12-QoL A: as 3 linhas Transform 64 → 68 (a folga do dono) —
     // 1234 → 1246
     // FASE UI C: o piso 40 — 1246 → 1322 (19 linhas de piso × +4dp)
-    EXPECT(nearEqF(contentH, 1322.0f));
+    // F4-Z2: a row Name saiu do plano (o nome vive no cabeçalho 44dp)
+    // — UMA linha de piso 40 menos: 1322 → 1282
+    EXPECT(nearEqF(contentH, 1282.0f));
 
     // cursor Y PARTILHADO: linhas sequenciais (y estritamente crescente, sem
     // reinício por secção), todas dentro do conteúdo, e o fundo do plano =
@@ -243,7 +245,9 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     // 1048 → 1228; 0.12-QoL A: as 3 linhas Transform 64 → 68 —
     // 1228 → 1240
     EXPECT(nearEqF(inspectorContentHeight(inspectorProfile(*tic), m, false, 0u),
-                   1320.0f));   // FASE UI C: o piso 40 (1240 + 20×4)
+                   1280.0f));   // FASE UI C: o piso 40 (1240 + 20×4) — F4-Z2:
+                                // a row Name saiu do plano (o nome vive no
+                                // cabeçalho de 44dp) = UMA row de 40dp menos
 }
 
 TEST(scroll_hierarquia_todos_os_tics_atingeis) {
@@ -319,7 +323,9 @@ TEST(scroll_linhas_mesh_tex_atingiveis_no_scroll) {
     // FASE UI C: o piso das linhas sobe (kRowH 40) — a Name acima da mesh
     // cresce +4dp (332 → 336)
     // FASE UI C: o piso 40 — a Name acima da mesh cresce +4dp (332 → 340)
-    EXPECT(nearEqF(plan[meshIdx].y, 340.0f));
+    // F4-Z2: a row Name saiu do plano — a mesh sobe UMA linha de
+    // piso 40 (340 → 300)
+    EXPECT(nearEqF(plan[meshIdx].y, 300.0f));
     // 0.8.0: a linha "prim:" fica entre mesh e tex (a ALTURA dela —
     // simbólico desde 0.9.6.6: zero números que driftam com o piso 48dp)
     EXPECT(nearEqF(plan[texIdx].y, plan[meshIdx].y + plan[meshIdx].h +

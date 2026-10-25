@@ -119,6 +119,11 @@ std::string jniBenchDeviceInfo();
 // ficheiros copiados (negativo = falha Java: -1 excepção, -2 API<29,
 // -3 sem ficheiros).
 bool jniExportLogsToDownloads(int* outCount);
+// F4-Z2: a caixa negra — o .txt + o PNG para Download/GOneVV/blackbox/
+// (MediaStore; devolve true com outCount = ficheiros escritos 0..2)
+bool jniExportBlackBoxToDownloads(const std::string& txt,
+                                  const std::vector<u8>& png,
+                                  int* outCount);
 
 // 0.6.7 — "Sair para projetos": pede à activity para se TERMINAR (a
 // ProjectManagerActivity está por baixo na back stack — o gesto volta ao

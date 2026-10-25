@@ -376,6 +376,14 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
                       "PNG+JSON p/ layout/", "Exportar layout")) {
             res = kExportLayout;
         }
+        // F4-Z2: A CAIXA NEGRA — o snapshot forense (.txt + PNG) com GL,
+        // recriações de contexto, câmara, viewport, ponteiros, gizmo, WE,
+        // contadores e o tail de 200 linhas do log; Downloads/GOneVV/
+        // blackbox/ no device, dir de logs no hospedeiro
+        if (actionRow(ui, kLayoutExpId + 137, ox, y, aw,
+                      "snapshot .txt+PNG", "Caixa negra")) {
+            res = kBlackBox;
+        }
         y += settingsRowH();
         if (actionRow(ui, kLayoutAudId, ox, y, aw,
                       "validador+log do ecrã", "Auditoria do ecrã")) {

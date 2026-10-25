@@ -416,17 +416,13 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
         }
     }
 
-    // ---- o chip do TOPO (⋯ — FASE UI B: o undo/redo/save subiram para a
-    // barra de topo; a fila morre e fica o menu de ficheiro ancorado) ----
-    if (L.quick[0].w > 0.0f) {
-        // o ⋯: abre o menu de ficheiro ANCORADO a ele (a folha de sempre;
-        // o glifo é o ⋮ da casa — o mesmo do menu da hierarquia)
-        if (railButton(ui, kVpMenuId, L.quick[0], icons::Icon::Dots, true)) {
-            a.menuPressed = true;
-            st.menuAx = L.quick[0].x;
-            st.menuAy = L.quick[0].y + L.quick[0].h;
-        }
-    }
+    // ---- F4-Z2 (o quadro vazio com ⋮): o chip do TOPO MORREU — era um
+    // DUPLICADO funcional do «Menu» da barra de topo (o MESMO fileMenu,
+    // main.cpp:8074) e ao lado do rail de ferramentas parecia um quadro
+    // vazio com um ⋮ sem propósito. O layout L.quick[0]/L.quickPanel
+    // CONTINUA (os pins da degradação — test_wiring090/test_sentinels —
+    // aferem o rect); só o DESENHO e o AÇÃO morrem, como o pai do rail
+    // na 0.12-QoL C. O menu de ficheiro vive no «Menu» da barra.
 
     // ---- 0.12-C (C-2): o GIZMO 40dp do topo-direito FOI REMOVIDO (a
     // ordem do dono: «remover o duplicado do Mover se não tiver função

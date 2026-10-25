@@ -91,6 +91,7 @@ jclass g_activityCls = nullptr;
 
 jmethodID g_midOpenAllFiles = nullptr;   // VvActivity.openAllFilesSettings(I)V
 jmethodID g_midExportLogs = nullptr;     // VvActivity.exportLogsToDownloads(String)I
+jmethodID g_midExportBlackBox = nullptr; // F4-Z2: exportBlackBoxToDownloads(String,String,byte[])I
 // 0.8.11 — o microfone da GRAVAÇÃO: VvActivity.ensureMicPermission()Z
 // (true = concedida; false = dialogo aberto, o dono re-toca Gravar)
 jmethodID g_midMicPermission = nullptr;  // VvActivity.ensureMicPermission()Z
@@ -283,6 +284,16 @@ void cacheActivityMethods(JNIEnv* env) {
         elog::error("jni: VvActivity.exportLogsToDownloads NÃO encontrada");
     } else {
         elog::info("jni: VvActivity.exportLogsToDownloads OK");
+    }
+
+    g_midExportBlackBox = env->GetMethodID(
+        g_activityCls, "exportBlackBoxToDownloads",
+        "(Ljava/lang/String;Ljava/lang/String;[B)I");
+    if (!g_midExportBlackBox || clearPendingException(env)) {
+        g_midExportBlackBox = nullptr;
+        elog::error("jni: VvActivity.exportBlackBoxToDownloads NÃO encontrada");
+    } else {
+        elog::info("jni: VvActivity.exportBlackBoxToDownloads OK");
     }
 
     // 0.6.7 — sair para o gestor (bridgeFinish). NÃO crítico: sem ele o
@@ -849,6 +860,42 @@ bool jniExportLogsToDownloads(int* outCount) {
     if (jrel) {
         env->DeleteLocalRef(jrel);
     }
+    if (clearPendingException(env)) {
+        return false;
+    }
+    if (outCount) {
+        *outCount = static_cast<int>(r);
+    }
+    return true;
+}
+
+// F4-Z2: a CAIXA NEGRA — o .txt + o PNG para Download/GOneVV/blackbox/
+// (MediaStore, o MESMO caminho do export de logs; corre no thread de jobs)
+bool jniExportBlackBoxToDownloads(const std::string& txt,
+                                  const std::vector<u8>& png,
+                                  int* outCount) {
+    JNIEnv* env = attachedEnv();
+    if (!env || !g_activity || !g_midExportBlackBox) {
+        return false;
+    }
+    jstring jrel = env->NewStringUTF("Download/GOneVV/blackbox");
+    jstring jtxt = env->NewStringUTF(txt.c_str());
+    jbyteArray jpng = env->NewByteArray(static_cast<jsize>(png.size()));
+    if (!jrel || !jtxt || !jpng) {
+        if (jrel) env->DeleteLocalRef(jrel);
+        if (jtxt) env->DeleteLocalRef(jtxt);
+        if (jpng) env->DeleteLocalRef(jpng);
+        return false;
+    }
+    if (!png.empty()) {
+        env->SetByteArrayRegion(jpng, 0, static_cast<jsize>(png.size()),
+                                reinterpret_cast<const jbyte*>(png.data()));
+    }
+    const jint r = env->CallIntMethod(g_activity, g_midExportBlackBox,
+                                      jrel, jtxt, jpng);
+    env->DeleteLocalRef(jrel);
+    env->DeleteLocalRef(jtxt);
+    env->DeleteLocalRef(jpng);
     if (clearPendingException(env)) {
         return false;
     }

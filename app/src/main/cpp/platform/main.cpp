@@ -70,6 +70,29 @@
 #include "render/GlResources.h"  // 0.12-Z F1: o GLResourceManager
 #include "platform/FileApi.h"
 #include "platform/InputState.h"
+#include "platform/BlackBox.h"   // F4-Z2: a caixa negra
+#include <sys/stat.h>   // F4-Z2: o mkdir do fallback da caixa
+// F4-Z2: o stub GLES do CI não traz estes 3 (o padrão do #define
+// local 7381) — a caixa negra usa-os nas linhas ~1354
+#ifndef GL_RENDERER
+#define GL_RENDERER 0x1F01
+#endif
+#ifndef GL_VERSION
+#define GL_VERSION 0x1F02
+#endif
+#ifndef GL_PACK_ALIGNMENT
+#define GL_PACK_ALIGNMENT 0x0D05
+#endif
+
+// F4-Z2: as declaracoes antecipadas da caixa negra (a definicao fica em
+// baixo ~5800; os usos comecam em cameraEnsureSane ~1100) - LINKAGE
+// INTERNO (o padrao 1-TU; ver platform/BlackBox.h)
+namespace vv { namespace blackbox {
+static void arm(const char* why);
+static std::string buildText();
+static bool waitIdle(int timeoutMs);
+static const char* hostDir();
+}}
 #include "platform/StorageBridge.h"
 #include "platform/StoragePerm.h"
 #include "platform/ImeQueue.h"   // 0.9.1: fila do IME do sistema + orientação
@@ -1103,6 +1126,17 @@ void cameraEnsureSane() {
         g_camera.dist = g_camera.distClamped(g_camera.dist);
         return;
     }
+    // F4-Z2: o AUTO-SAVE da caixa negra na CÂMARA INVÁLIDA (o dono: «o
+    // snapshot com a câmara inválida») — o estado PRÉ-reposição fica no
+    // snapshot (a câmara ainda está má AQUI; o texto leva os valores crus)
+    {
+        char bbw[96];
+        std::snprintf(bbw, sizeof(bbw),
+                      "câmara inválida (yaw %.3f pitch %.3f dist %.3f)",
+                      (double)g_camera.yaw, (double)g_camera.pitch,
+                      (double)g_camera.dist);
+        blackbox::arm(bbw);
+    }
     elog::warn("camera: estado inválido (NaN/fora dos limites) detetado "
                "no lifecycle — a câmara repõe o PADRÃO (a cena fica)");
     const Camera fresh;
@@ -1166,6 +1200,13 @@ struct ThumbJob {
     std::vector<u8> rgba;              // o frame capturado (dono: o worker)
     u32 rw = 0, rh = 0;                // dims do buffer RGBA (bottom-up)
     u64 msOff = 0;                     // o orçamento off-thread MEDIDO
+    // F4-Z2 (o aviso 74ms): o relógio DIVIDIDO — o orçamento de 50ms da
+    // spec D7 é de CPU (flip+crop+downsample+encode); a ESCRITA no
+    // storage (SAF no device, IPC do MediaStore) corre no MESMO thread
+    // mas NÃO é o trabalho do thumb — contava no mesmo msOff e o aviso
+    // disparava com a I/O lenta do provider, não com o thumb.
+    u64 msCpu = 0;                     // flip+crop+downsample+encode
+    u64 msIo = 0;                      // open+write+close no storage
     size_t pngBytes = 0;               // o tamanho do PNG escrito
     u32 tw = 0, th = 0;                // as dims do PNG
     bool ok = false;
@@ -1214,6 +1255,11 @@ static void thumbJobWorker(ThumbJob& j) {
         j.done.store(true);
         return;
     }
+    // F4-Z2: o corte do relógio — aqui acaba o TRABALHO de CPU do thumb
+    const auto tCpu = std::chrono::steady_clock::now();
+    j.msCpu = static_cast<u64>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(tCpu - t0)
+            .count());
     const int hs = g_storage->openWriteStream("thumb.png");
     if (hs <= 0) {
         elog::warn("thumb: captura falhou (openWriteStream thumb.png) — "
@@ -1230,6 +1276,11 @@ static void thumbJobWorker(ThumbJob& j) {
         return;
     }
     g_storage->closeWriteStream(hs);
+    // F4-Z2: a I/O do storage medida À PARTE (o orçamento 50ms NÃO é dela)
+    j.msIo = static_cast<u64>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - tCpu)
+            .count());
     j.pngBytes = png.size();
     j.ok = true;
     j.msOff = static_cast<u64>(
@@ -1250,10 +1301,16 @@ static void thumbJobReap() {
         // o LOG DO ORÇAMENTO (a spec: ≤~50ms off-thread, PNG ≤~60KB) —
         // 0.9.6.19 (D16): o formato do dono «thumb: captura ok/falhou»
         if (g_thumbJob.ok) {
+            // F4-Z2: o aviso do orçamento passa a medir SÓ a CPU (msCpu) —
+            // a I/O do storage (msIo) é do provider, não do thumb; o log
+            // mostra os TRÊS tempos para o dono ver a repartição
             elog::info("thumb: captura ok (%ux%u PNG %zu B, %llums "
-                       "off-thread; orçamento 50ms)%s",
+                       "off-thread (cpu %llums + io %llums); orçamento "
+                       "50ms)%s",
                        g_thumbJob.tw, g_thumbJob.th, g_thumbJob.pngBytes,
                        (unsigned long long)g_thumbJob.msOff,
+                       (unsigned long long)g_thumbJob.msCpu,
+                       (unsigned long long)g_thumbJob.msIo,
                        g_thumbJob.pngBytes > 60u * 1024u
                            ? " — AVISO: PNG acima do orçamento"
                            : "");
@@ -1262,10 +1319,146 @@ static void thumbJobReap() {
                            "manter o PNG pequeno (verificar conteúdo)",
                            g_thumbJob.pngBytes);
             }
-            if (g_thumbJob.msOff > 50ull) {
-                elog::warn("thumb: %llums off-thread > orçamento 50ms",
-                           (unsigned long long)g_thumbJob.msOff);
+            if (g_thumbJob.msCpu > 50ull) {
+                elog::warn("thumb: %llums de CPU > orçamento 50ms (a I/O "
+                           "do storage, %llums, não é do thumb)",
+                           (unsigned long long)g_thumbJob.msCpu,
+                           (unsigned long long)g_thumbJob.msIo);
             }
+        }
+    }
+}
+
+// ===== F4-Z2: A CAIXA NEGRA (o contrato vive em platform/BlackBox.h) ====
+std::atomic<bool> g_blackboxPending{false};
+char g_blackboxWhy[96] = {0};
+char g_bbGlRenderer[128] = {0};   // capturados no PONTO SEGURO (thread GL)
+char g_bbGlVersion[128] = {0};
+UiRect g_bbVpRect{0.0f, 0.0f, 0.0f, 0.0f};
+bool  g_bbVpValid = false;
+
+struct BlackBoxJob {
+    std::thread worker;
+    std::atomic<bool> active{false};
+    std::atomic<bool> done{false};
+    std::vector<u8> rgba;      // o backbuffer cru (dono: o main até ao spawn)
+    u32 rw = 0, rh = 0;
+    std::vector<u8> png;       // o PNG encoded (dono: o worker)
+    std::string txt;           // o snapshot (nascido na thread GL)
+    std::string why;           // o gatilho
+    bool ok = false;
+    std::string err;
+} g_blackboxJob;
+
+
+// o corpo do job (thread de jobs): flip + encode PNG + a ESCRITA
+static void blackboxWorker(BlackBoxJob& j) {
+    j.ok = false;
+    j.err.clear();
+    thumb::flipVerticalRgba(j.rgba.data(), j.rw, j.rh);
+    j.png = thumb::encodePngRgba(j.rgba.data(), j.rw, j.rh);
+    if (j.png.empty()) {
+        j.err = "encode PNG vazio";
+        return;
+    }
+#ifdef __ANDROID__
+    int copied = 0;
+    if (!storage::jniExportBlackBoxToDownloads(j.txt, j.png, &copied) ||
+        copied < 2) {
+        j.err = "JNI export falhou (copiado=" + std::to_string(copied) + ")";
+        return;
+    }
+    j.ok = true;
+#else
+    const char* d = elog::dir();
+    std::string dir = (d && d[0]) ? std::string(d) : "/tmp/goni_blackbox";
+    if (dir.rfind("/tmp/goni_blackbox", 0) == 0) {
+        ::mkdir("/tmp/goni_blackbox", 0755);   // o fallback do hospedeiro
+    }
+    char selo[32];
+    std::snprintf(selo, sizeof(selo), "%lld",
+                  static_cast<long long>(::time(nullptr)));
+    const std::string base = dir + "/blackbox-" + selo;
+    FILE* f = ::fopen((base + ".txt").c_str(), "wb");
+    if (!f) {
+        j.err = "fwrite txt falhou (errno " +
+                std::to_string(errno) + ")";
+        return;
+    }
+    ::fwrite(j.txt.data(), 1, j.txt.size(), f);
+    ::fclose(f);
+    f = ::fopen((base + ".png").c_str(), "wb");
+    if (!f) {
+        j.err = "fwrite png falhou (errno " +
+                std::to_string(errno) + ")";
+        return;
+    }
+    ::fwrite(j.png.data(), 1, j.png.size(), f);
+    ::fclose(f);
+    j.ok = true;
+#endif
+}
+
+// o PONTO SEGURO (thread GL, fim do frame antes do swap): strings GL +
+// glReadPixels do backbuffer INTEIRO + spawn do worker (o padrão ImportJob)
+static void blackboxCaptureIfPending(f32 w, f32 h) {
+    if (!g_blackboxPending.load()) {
+        return;
+    }
+    g_blackboxPending.store(false);
+    if (g_blackboxJob.active.load()) {
+        elog::warn("blackbox: snapshot anterior ainda a correr — este perde-se");
+        return;
+    }
+    const u32 rw = static_cast<u32>(w), rh = static_cast<u32>(h);
+    if (rw == 0 || rh == 0) {
+        return;
+    }
+    if (!g_bbGlRenderer[0]) {
+        const GLubyte* r = glGetString(GL_RENDERER);
+        const GLubyte* v = glGetString(GL_VERSION);
+        if (r) std::strncpy(g_bbGlRenderer, (const char*)r,
+                            sizeof(g_bbGlRenderer) - 1);
+        if (v) std::strncpy(g_bbGlVersion, (const char*)v,
+                            sizeof(g_bbGlVersion) - 1);
+    }
+    g_blackboxJob.rgba.resize(static_cast<size_t>(rw) * rh * 4u);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, rw, rh, GL_RGBA, GL_UNSIGNED_BYTE,
+                 g_blackboxJob.rgba.data());
+    if (glGetError() != GL_NO_ERROR) {
+        elog::warn("blackbox: glReadPixels falhou — snapshot abortado");
+        return;
+    }
+    g_blackboxJob.rw = rw;
+    g_blackboxJob.rh = rh;
+    g_blackboxJob.txt = vv::blackbox::buildText();
+    g_blackboxJob.why = g_blackboxWhy;
+    g_blackboxJob.ok = false;
+    g_blackboxJob.done.store(false);
+    g_blackboxJob.active.store(true);
+    g_blackboxJob.worker = std::thread([] {
+        blackboxWorker(g_blackboxJob);
+        g_blackboxJob.done.store(true);
+    });
+    elog::info("blackbox: capturado (%s) — %ux%u; encode+escrita off-thread",
+               g_blackboxWhy, rw, rh);
+}
+
+// o join no main (o frame NUNCA espera pelo encode)
+static void blackboxReap() {
+    if (g_blackboxJob.active.load() && g_blackboxJob.done.load()) {
+        if (g_blackboxJob.worker.joinable()) {
+            g_blackboxJob.worker.join();
+        }
+        g_blackboxJob.active.store(false);
+        if (g_blackboxJob.ok) {
+            elog::info("blackbox: snapshot OK (%s) — PNG %zu B, txt %zu B",
+                       g_blackboxJob.why.c_str(), g_blackboxJob.png.size(),
+                       g_blackboxJob.txt.size());
+        } else {
+            elog::warn("blackbox: snapshot FALHOU — %s",
+                       g_blackboxJob.err.c_str());
         }
     }
 }
@@ -1916,7 +2109,12 @@ void loadProjectSettings() {
     g_texPerfil = TexPerfil::Qualidade;
     if (g_storage) {
         std::string text;
-        if (g_storage->readText("settings.goni", text)) {
+        // F4-Z2 (o ponto vermelho honesto): settings.goni é OPCIONAL — o
+        // probe() antes do read evita o E/ do SAF para um ficheiro que
+        // NÃO EXISTE (o default de todo o projeto novo); a falta deixa de
+        // ser «erro» no log e o ponto dos Painéis deixa de arder sempre.
+        if (g_storage->probe("settings.goni") == Presence::Present &&
+            g_storage->readText("settings.goni", text)) {
             g_keepSource = text.find("keepSource=0") == std::string::npos;
             // 0.10-M (EXT): o modo do import (fundido = default mobile)
             g_expandNodes = text.find("expandNodes=1") != std::string::npos;
@@ -1943,8 +2141,12 @@ void loadProjectSettings() {
         g_pipeline->clearOverrides();
         u32 nOvr = 0;
         std::string text;
-        if (g_storage && g_storage->readText("textures/overrides.goni",
-                                             text)) {
+        // F4-Z2: o MESMO probe dos opcionais (overrides.goni é opcional
+        // em TODO o projeto sem overrides — nunca foi erro)
+        if (g_storage &&
+            g_storage->probe("textures/overrides.goni") ==
+                Presence::Present &&
+            g_storage->readText("textures/overrides.goni", text)) {
             // uma linha por asset: «<stem> <maxDim>» — maxDim 0 = NUNCA
             // reduzir; # inicia comentário (a convenção da casa)
             size_t pos = 0;
@@ -2139,13 +2341,32 @@ static void logBootMemory(const char* where) {
     if (FILE* f = ::fopen("/proc/self/status", "r")) {
         char line[256];
         while (::fgets(line, sizeof(line), f)) {
-            if (::sscanf(line, "VmRSS: %ld kB", &rssKb) == 1) { continue; }
-            if (::sscanf(line, "VmHWM: %ld kB", &hwmKb) == 1) { break; }
+            // F4-Z2 (o RSS=-1): parse por PREFIXO + strtol (o padrão do
+            // Bench.cpp) — o sscanf «%ld kB» exigia o sufixo literal e
+            // perdia a linha em kernels variantes, e a sentinela -1
+            // chegava CRUA ao dono sem dizer «não medido»
+            if (::strncmp(line, "VmRSS:", 6) == 0) {
+                rssKb = ::strtol(line + 6, nullptr, 10);
+                continue;
+            }
+            if (::strncmp(line, "VmHWM:", 6) == 0) {
+                hwmKb = ::strtol(line + 6, nullptr, 10);
+                break;
+            }
         }
         ::fclose(f);
     }
-    elog::info("boot: memoria (%s) — RSS=%ld kB pico=%ld kB", where, rssKb,
-               hwmKb);
+    // F4-Z2: a sentinela NUNCA chega crua — «não medido» é o valor
+    // honesto (o fopen falha em sandbox/CI sem /proc; nunca é um bug do
+    // boot).
+    if (rssKb >= 0 && hwmKb >= 0) {
+        elog::info("boot: memoria (%s) — RSS=%ld kB pico=%ld kB", where,
+                   rssKb, hwmKb);
+    } else {
+        elog::info("boot: memoria (%s) — RSS=não medido pico=não medido "
+                   "(/proc/self/status indisponível)",
+                   where);
+    }
 }
 
 // arranca o backend (boot). 0.9.3 (REG-002/R-006): a CADEIA é
@@ -5547,6 +5768,156 @@ void editorRecalcHitCaches() {
 // TUDO, recria a partir de CPU/ficheiros, repõe a câmara e o estado de
 // interação. O indicador de saúde mostra «GL: RECRIADO n» (o dono vê).
 u32 g_contextRecreations = 0;   // o contador do indicador de saúde
+} // namespace — F4-Z2: a caixa negra vive FORA do unnamed (o harness
+             // inclui main.cpp dentro de UM namespace anónimo: um namespace
+             // vv daqui dentro criava o unnamed::vv ambíguo)
+namespace vv { namespace blackbox {
+
+// LINKAGE INTERNO (static): main.cpp é incluído como TU único pelos
+// harnesses (o padrão da casa) — símbolos externos aqui = multiple
+// definition na ligação dos testes. Cada TU tem a sua cópia.
+static void arm(const char* why) {
+    std::snprintf(g_blackboxWhy, sizeof(g_blackboxWhy), "%s", why);
+    g_blackboxPending.store(true);
+}
+
+static const char* hostDir() {
+    return elog::dir();
+}
+
+static std::string buildText() {
+    // a hora local (o snapshot é um documento — leva selo de tempo)
+    char quando[64];
+    {
+        std::time_t t = ::time(nullptr);
+        struct tm tmv;
+        ::localtime_r(&t, &tmv);
+        std::strftime(quando, sizeof(quando), "%Y-%m-%d %H:%M:%S", &tmv);
+    }
+    char linha[512];
+    std::string out;
+    out.reserve(8192);
+    out += "== CAIXA NEGRA G.ONE VV ==\n";
+    std::snprintf(linha, sizeof(linha), "gatilho: %s\n", g_blackboxWhy);
+    out += linha;
+    std::snprintf(linha, sizeof(linha), "quando: %s\n", quando);
+    out += linha;
+    std::snprintf(linha, sizeof(linha), "GL_RENDERER: %s\n",
+                  g_bbGlRenderer[0] ? g_bbGlRenderer : "(sem GL no frame)");
+    out += linha;
+    std::snprintf(linha, sizeof(linha), "GL_VERSION: %s\n",
+                  g_bbGlVersion[0] ? g_bbGlVersion : "(sem GL no frame)");
+    out += linha;
+    std::snprintf(linha, sizeof(linha),
+                  "contexto: %u recriacoe(s) desde o boot\n",
+                  g_contextRecreations);
+    out += linha;
+    std::snprintf(linha, sizeof(linha), "estado do frame: %s\n",
+                  g_statusLine[0] ? g_statusLine : "(sem status)");
+    out += linha;
+    std::snprintf(linha, sizeof(linha),
+                  "camara: target=(%.2f, %.2f, %.2f) yaw=%.4f pitch=%.4f "
+                  "dist=%.3f fovY=%.4f near=%.3f far=%.1f\n",
+                  (double)g_camera.target.x, (double)g_camera.target.y,
+                  (double)g_camera.target.z, (double)g_camera.yaw,
+                  (double)g_camera.pitch, (double)g_camera.dist,
+                  (double)g_camera.fovY, (double)g_camera.nearZ,
+                  (double)g_camera.farZ);
+    out += linha;
+    std::snprintf(linha, sizeof(linha),
+                  "viewport 3D: (%.0f, %.0f, %.0f x %.0f)%s\n",
+                  (double)g_bbVpRect.x, (double)g_bbVpRect.y,
+                  (double)g_bbVpRect.w, (double)g_bbVpRect.h,
+                  g_bbVpValid ? "" : " (ainda sem rect)");
+    out += linha;
+    static const char* kGizmoModo[] = {"Mover", "Rodar", "Escalar"};
+    const u32 gm = static_cast<u32>(g_gizmo.mode);
+    std::snprintf(linha, sizeof(linha),
+                  "gizmo: modo=%s eixoAtivo=%d hover=%d\n",
+                  gm < 3u ? kGizmoModo[gm] : "?",
+                  static_cast<int>(g_gizmo.active),
+                  static_cast<int>(g_gizmo.hovered));
+    out += linha;
+    {
+        u32 vivos = 0;
+        char ptrs[256];
+        ptrs[0] = 0;
+        size_t used = 0;
+        for (u32 sl = 0; sl < kMaxPointerSlots; ++sl) {
+            if (!g_input.pressed(sl)) continue;
+            f32 px = 0.0f, py = 0.0f;
+            g_input.pos(sl, px, py);
+            int n = std::snprintf(ptrs + used, sizeof(ptrs) - used,
+                                  "%s%u(%.0f,%.0f)", vivos ? " " : "", sl,
+                                  (double)px, (double)py);
+            if (n < 0 || used + static_cast<size_t>(n) >= sizeof(ptrs)) break;
+            used += static_cast<size_t>(n);
+            ++vivos;
+        }
+        std::snprintf(linha, sizeof(linha),
+                      "ponteiros: %u vivo(s)%s%s\n", vivos,
+                      vivos ? " — " : "", ptrs);
+        out += linha;
+    }
+    {
+        const Tic* tsel = g_scene.get(g_editor.selected);
+        const Environment* env = tsel ? tsel->getComponent<Environment>()
+                                      : nullptr;
+        if (env) {
+            std::snprintf(linha, sizeof(linha),
+                          "WE (TIC selecionado): skyType=%u fogDensity=%.4f "
+                          "ambient=%.3f\n",
+                          static_cast<unsigned>(env->skyType),
+                          (double)env->fogDensity, (double)env->ambient);
+        } else {
+            std::snprintf(linha, sizeof(linha),
+                          "WE (TIC selecionado): sem Environment\n");
+        }
+        out += linha;
+    }
+    std::snprintf(linha, sizeof(linha),
+                  "recursos GL (nascidos/mortos): Program %u/%u Buffer %u/%u "
+                  "Vao %u/%u Texture %u/%u Fbo %u/%u\n",
+                  gldbg::createdOf(gldbg::Kind::Program),
+                  gldbg::destroyedOf(gldbg::Kind::Program),
+                  gldbg::createdOf(gldbg::Kind::Buffer),
+                  gldbg::destroyedOf(gldbg::Kind::Buffer),
+                  gldbg::createdOf(gldbg::Kind::Vao),
+                  gldbg::destroyedOf(gldbg::Kind::Vao),
+                  gldbg::createdOf(gldbg::Kind::Texture),
+                  gldbg::destroyedOf(gldbg::Kind::Texture),
+                  gldbg::createdOf(gldbg::Kind::Fbo),
+                  gldbg::destroyedOf(gldbg::Kind::Fbo));
+    out += linha;
+    out += "== ULTIMAS 200 LINHAS DO ENGINE.LOG ==\n";
+    std::vector<std::string> tail;
+    elog::readTail(tail, 200);
+    for (const std::string& ln : tail) {
+        out += ln;
+        out += "\n";
+    }
+    return out;
+}
+
+static bool waitIdle(int timeoutMs) {
+    // só testes/harness: espera o job terminar (o CI não faz spin forever)
+    const auto t0 = std::chrono::steady_clock::now();
+    while (std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now() - t0)
+               .count() < timeoutMs) {
+        if (!g_blackboxJob.active.load() ||
+            (g_blackboxJob.active.load() && g_blackboxJob.done.load())) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return !g_blackboxJob.active.load();
+}
+
+}} // namespace vv::blackbox
+
+
+namespace {  // F4-Z2: reabre o unnamed do main
 u32 g_glErrorStreak = 0;        // os glGetError seguidos (o limiar 30)
 u32 g_recoveryCooldown = 0;     // os frames de espera entre tentativas
 u32 g_simulateLossFrames = 0;   // 0.12-Z F4: o botão «simular perda»
@@ -5626,6 +5997,19 @@ void contextRecover(const char* why) {
         return;
     }
     cameraEnsureSane();
+    // F4-Z2 (o contrato do vidro — Renderer.h:67): o MUNDO atrás mudou
+    // (todos os objetos GL recriados) — o vidro invalida; o consumidor
+    // (captureGlass) está dormente desde o D-2, o sinal fica pronto
+    g_renderer.glassInvalidate();
+    // F4-Z2: o AUTO-SAVE da caixa negra na RECRIAÇÃO de contexto (o dono:
+    // «auto-save … quando o contexto é recriado») — o snapshot sai no fim
+    // do frame corrente (o primeiro frame da vida nova do GL)
+    {
+        char bbw[96];
+        std::snprintf(bbw, sizeof(bbw), "contexto recriado #%u",
+                      g_contextRecreations);
+        blackbox::arm(bbw);
+    }
     elog::warn("gldebug: recuperação #%u COMPLETA (as sondas voltaram)",
                g_contextRecreations);
 }
@@ -7203,6 +7587,7 @@ void frame() {
     // 0.9.6.18 (HOTFIX D7): junta o job de thumb terminado (o frame NUNCA
     // espera — só colhe o resultado se o worker já acabou)
     thumbJobReap();
+    blackboxReap();   // F4-Z2: o join do job da caixa negra
 
     // 0.9.0 (spec E): o estado do drawer alimenta os rects dos painéis/
     // viewport neste frame (a fonte é o BottomState — persistente)
@@ -7613,7 +7998,13 @@ void frame() {
                     std::fabs(s_prevVp.y - vp3d.y) > 0.5f ||
                     std::fabs(s_prevVp.w - vp3d.w) > 0.5f ||
                     std::fabs(s_prevVp.h - vp3d.h) > 0.5f;
-                if (changed) {
+                // F4-Z2 (o spam do arrasto): durante o arrasto do
+                // separador o rect muda de fato A CADA FRAME (o snap de
+                // 8dp nunca para ≥0,5px seguidos) — o detetor «só na
+                // mudança» disparava por frame. Durante st.divDragActive
+                // o log CALA; ao largar, o rect final difere do prev e
+                // UMA linha única sai com o resultado do arrasto.
+                if (changed && !g_editor.divDragActive) {
                     elog::info(
                         "vp3d: viewport set to (%.0f, %.0f, %.0f x %.0f) — "
                         "aspect %.3f",
@@ -7621,6 +8012,44 @@ void frame() {
                         (double)vp3d.h, (double)(vp3d.w / vp3d.h));
                     s_prevVp = vp3d;
                     s_prevValid = true;
+                }
+                // F4-Z2 (o contrato do vidro — Renderer.h:67): a ÓRBITA e
+                // o RECT mudam o que está atrás dos painéis de vidro —
+                // invalida. (a cena não tem contador de versão — a lacuna
+                // fica documentada no relatório; o consumidor captureGlass
+                // está dormente desde o D-2: o sinal não muda o render,
+                // PROVADO pelo raster byte a byte)
+                g_bbVpRect = vp3d;   // F4-Z2: o rect do snapshot
+                g_bbVpValid = true;
+                {
+                    static Camera s_prevGlassCam;
+                    static UiRect s_prevGlassRect{0.0f, 0.0f, 0.0f, 0.0f};
+                    static bool s_prevGlassValid = false;
+                    const bool camChanged =
+                        !s_prevGlassValid ||
+                        std::fabs(s_prevGlassCam.yaw - g_camera.yaw) > 1e-4f ||
+                        std::fabs(s_prevGlassCam.pitch - g_camera.pitch) >
+                            1e-4f ||
+                        std::fabs(s_prevGlassCam.dist - g_camera.dist) >
+                            1e-3f ||
+                        std::fabs(s_prevGlassCam.target.x - g_camera.target.x) >
+                            1e-3f ||
+                        std::fabs(s_prevGlassCam.target.y - g_camera.target.y) >
+                            1e-3f ||
+                        std::fabs(s_prevGlassCam.target.z - g_camera.target.z) >
+                            1e-3f;
+                    const bool rectChanged =
+                        !s_prevGlassValid ||
+                        std::fabs(s_prevGlassRect.x - vp3d.x) > 0.5f ||
+                        std::fabs(s_prevGlassRect.y - vp3d.y) > 0.5f ||
+                        std::fabs(s_prevGlassRect.w - vp3d.w) > 0.5f ||
+                        std::fabs(s_prevGlassRect.h - vp3d.h) > 0.5f;
+                    if (camChanged || rectChanged) {
+                        g_renderer.glassInvalidate();
+                        s_prevGlassCam = g_camera;
+                        s_prevGlassRect = vp3d;
+                        s_prevGlassValid = true;
+                    }
                 }
             }
         }
@@ -7957,6 +8386,7 @@ void frame() {
         g_ui.endFrame();
         g_lastUiStats = g_renderer.endFrame();
         layoutDumpIfPending(w, h);   // GRUPO B: o modal também é ecrã
+        blackboxCaptureIfPending(w, h);   // F4-Z2: idem — frame inteiro
         swapAndWatch();   // 0.12-Z2 F1: o swap TRATADO
         g_input.clearEdges();
         return;   // MODAL: nada mais desenha/processa este frame
@@ -8010,6 +8440,7 @@ void frame() {
         g_lastUiStats = g_renderer.endFrame(); // UI por cima do 3D
         if (g_ui.auditing()) g_ui.auditEnd();
         layoutDumpIfPending(w, h);   // GRUPO B: o play também é ecrã
+        blackboxCaptureIfPending(w, h);   // F4-Z2: idem — frame inteiro
         swapAndWatch();   // 0.12-Z2 F1: o swap TRATADO
         g_input.clearEdges();
         return;
@@ -8338,6 +8769,14 @@ void frame() {
             }
             case editor::settings::kCopyBench: {
                 benchCopyReport();
+                break;
+            }
+            case editor::settings::kBlackBox: {
+                // F4-Z2: o botão ARMA — o snapshot é o frame CORRENTE (com
+                // o Settings visível: o estado do momento é o que importa)
+                blackbox::arm("botão Settings › Diagnóstico");
+                elog::info("blackbox: armado pelo botão (o frame corrente "
+                           "é o snapshot)");
                 break;
             }
             case editor::settings::kExportLayout: {
@@ -9862,8 +10301,19 @@ void frame() {
                 }
             }
         }
+        if (ba.viewLogPressed) {
+            // F4-Z2 (o «Ver log» que exportava): o chip da Consola ABRE o
+            // MESMO viewer do menu ⋯ (choice 14) — tail 300 + dumps
+            g_editor.logViewer = true;
+            g_editor.logViewerJustOpened = true;
+            g_logLines.clear();
+            elog::readTail(g_logLines, 300);
+            refreshLogDumps();
+        }
         if (ba.exportPressed) {
             // o MESMO Export do Settings: Downloads/GOneVV/logs (MediaStore)
+            // (legado — o chip passou a viewLogPressed; o export do dia a
+            // dia vive no viewer com a verificação de baixo)
             int copied = 0;
             if (storage::jniExportLogsToDownloads(&copied) && copied >= 0) {
                 showToast("logs exportados");
@@ -9871,6 +10321,32 @@ void frame() {
                            elog::kDownloadsRelPath);
             } else {
                 showToast("export falhou (sem ficheiros? API<29?)");
+            }
+        }
+        if (g_editor.logExportPressed) {
+            g_editor.logExportPressed = false;
+            // F4-Z2: «Exportar log» COM a verificação da existência do
+            // ficheiro — sem engine.log no disco o export morre ANTES do
+            // MediaStore com o motivo honesto (o toast antigo escondia a
+            // causa: «sem ficheiros? API<29?» não dizia QUAL)
+            const std::string logFile =
+                std::string(elog::dir()) + "/engine.log";
+            FILE* lf = ::fopen(logFile.c_str(), "rb");
+            if (lf == nullptr) {
+                showToast("export falhou — engine.log não existe");
+                elog::warn("logs: export cancelado — %s não existe",
+                           logFile.c_str());
+            } else {
+                ::fclose(lf);
+                int copied = 0;
+                if (storage::jniExportLogsToDownloads(&copied) &&
+                    copied >= 0) {
+                    showToast("logs exportados");
+                    elog::info("logs: exportados %d ficheiro(s) para %s",
+                               copied, elog::kDownloadsRelPath);
+                } else {
+                    showToast("export falhou (API<29? sem ficheiros?)");
+                }
             }
         }
     }
@@ -9896,6 +10372,7 @@ void frame() {
     // 0.9.6.5 (GRUPO B): o layout exportado — MESMO ponto (frame completo,
     // antes do swap); lê o backbuffer INTEIRO + o registo do audit.
     layoutDumpIfPending(w, h);
+    blackboxCaptureIfPending(w, h);   // F4-Z2: a caixa negra no MESMO ponto seguro
 
     swapAndWatch();   // 0.12-Z2 F1: o swap TRATADO
     g_input.clearEdges();   // edges já consumidas pela UI/câmara neste frame
