@@ -53,6 +53,8 @@
 #include "platform/main.cpp"
 
 #include "platform/BlackBox.h"  // F4-Z2: a caixa negra
+#include "raster_golden.h"      // F5-Z2: a maquinaria das golden images
+#include "assets/PngLoader.h"   // F5-Z2: o decode do PNG de referência (GL-free)
 #include <filesystem>
 #include "render/ThumbPng.h"   // encodePngRgba (o encoder PNG da engine)
 #include "render/Cube.h"       // makeCube (a geometria do TIC Cubo)
@@ -1317,6 +1319,371 @@ int climaRun() {
     return failures;
 }
 
+// ===========================================================================
+// FASE 5-Z2 — GOLDEN IMAGES (a regressão POR IMAGEM, o pedido do dono da
+// FASE 5): as cenas DOURADAS determinísticas (dt fixo 1/60 no assentamento,
+// os relógios g_fxTime/g_skyTime AFOFERRADOS com stepFrame(0.0f) antes da
+// leitura, o thunderTimer longe do flash) → o hash FNV-1a 64 da
+// MAQUINARIA (raster_golden.h — o MESMO algoritmo do frameHash/V9) + a
+// assinatura estrutural da região central → a lista viva em
+// tests/golden/golden_z2.txt + os PNGs de referência em
+// tests/golden/png/.
+//
+//   --golden-write  REGENERA (o protocolo no RELATORIO-0.12-Z2-F5.md
+//                   §F5.3: o Mesa novo → o diff revisto → o ficheiro novo
+//                   no MESMO commit que o documenta);
+//   --golden        COMPARA: o PNG de referência decodifica (loadPng — o
+//                   mesmo decodificador do pipeline de texturas) e o
+//                   veredicto é o da casa: EXATO (byte a byte),
+//                   TOLERANCIA (o V9: diff <0.5% E maxDelta ≤32 — o chip
+//                   do FPS muda o número, o CONTEÚDO não) ou FALHA (o
+//                   diff PNG vermelho sai em out-raster/ e o exit é 1).
+// ===========================================================================
+int goldenRun(bool writeMode) {
+    std::printf("\n== FASE 5 — GOLDEN IMAGES (%s) ==\n",
+                writeMode ? "WRITE — regeneração" : "VERIFY — a comparação");
+    int failures = 0;
+    const std::string gpath =
+        std::string(REPO_ROOT) + "/" + gogolden::goldenRelPath();
+    const std::string pdir =
+        std::string(REPO_ROOT) + "/tests/golden/png";
+
+    // a pose de sempre (a mesma da FASE B) e o assentamento+aferramento
+    // (o padrão do V9: 30 frames a dt 1/60, depois os relógios FIXOS e
+    // dois passos a dt 0 — o frame LIDO é o mesmo em TODAS as corridas)
+    auto poseSempre = []() {
+        g_camera.target = Vec3{0.0f, 0.0f, 0.0f};
+        g_camera.yaw = 0.60f;
+        g_camera.pitch = 0.50f;
+        g_camera.dist = 6.0f;
+    };
+    auto aferrar = []() {
+        for (int i = 0; i < 30; ++i) stepFrame(1.0f / 60.0f);
+        g_fxTime = 50.0f;
+        g_skyTime = 100.0f;
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+    };
+
+    // o WE e o clima criados inline (os ponteiros da cena na mão — o mesmo
+    // corpo da FASE B e do addWeatherTic, com o raio longe do flash)
+    Handle envH{};
+    Environment* env = nullptr;
+    Handle wxH{};
+    auto criarWe = [&]() {
+        envH = g_scene.create("WorldEnvironment");
+        Tic* t = g_scene.get(envH);
+        t->addComponent<Transform3D>();
+        env = t->addComponent<Environment>();
+        env->skyType = Environment::kSkyTypeProcedural;
+    };
+    auto criarClima = [&](u8 tipo) {
+        wxH = g_scene.create("Clima");
+        Tic* t = g_scene.get(wxH);
+        t->addComponent<Transform3D>();
+        AmbientEnvironment* ae = t->addComponent<AmbientEnvironment>();
+        ParticleEmitter* pe = t->addComponent<ParticleEmitter>();
+        ae->weatherType = tipo;
+        ae->thunderTimer = 60.0f;   // o raio longe (o hash estável)
+        ae->applyWeatherPreset(pe);
+    };
+
+    // o capturado (nome + frame + dims + a entrada da lista)
+    struct Got {
+        std::string nome;
+        std::vector<u8> frame;
+        int w = 0, h = 0;
+        gogolden::GoldenEntry e;
+    };
+    std::vector<Got> got;
+    auto capturar = [&](const char* nome) {
+        aferrar();
+        int w = 0, h = 0;
+        const std::vector<u8> px = readFrame(&w, &h);
+        const PixStats st =
+            regionStats(px, w, h, w / 4, h / 2, 3 * w / 4, 3 * h / 4);
+        Got g;
+        g.nome = nome;
+        g.frame = px;
+        g.w = w;
+        g.h = h;
+        g.e.name = nome;
+        g.e.hash = gogolden::fnv1a64(px.data(), px.size());
+        g.e.nonBg = st.nonBackground;
+        g.e.distinct = st.distinct;
+        g.e.meanLum = st.meanLum;
+        got.push_back(g);
+        capturePng(std::string("golden_") + nome);
+        std::printf("    %s: hash=%016llx nonBg=%ld distinct=%ld meanLum=%.4f\n",
+                    nome, static_cast<unsigned long long>(g.e.hash),
+                    st.nonBackground, st.distinct, st.meanLum);
+    };
+    auto writeDiffPng = [&](const Got& g, const std::vector<u8>& ref) {
+        std::vector<u8> mask(g.frame.size());
+        gogolden::diffMaskRgba(g.frame.data(), ref.data(), g.frame.size(),
+                               mask.data());
+        // o flip (GL lê da base; PNG é top-down — o mesmo do capturePng)
+        std::vector<u8> top(mask.size());
+        const int row = g.w * 4;
+        for (int y = 0; y < g.h; ++y) {
+            std::memcpy(&top[static_cast<size_t>(y) * row],
+                        &mask[static_cast<size_t>(g.h - 1 - y) * row], row);
+        }
+        const std::vector<u8> png = thumb::encodePngRgba(top.data(), g.w, g.h);
+        const std::string full =
+            std::string(kOutDir) + "/golden_diff_" + g.nome + ".png";
+        FILE* f = std::fopen(full.c_str(), "wb");
+        if (f) {
+            std::fwrite(png.data(), 1, png.size(), f);
+            std::fclose(f);
+        }
+        std::printf("      diff PNG: %s\n", full.c_str());
+    };
+
+    poseSempre();
+
+    // ---- AS CENAS DOURADAS (a ORDEM é o contrato da lista) --------------
+    // (1) default_we — o boot + o WE procedural (o frame de sempre)
+    criarWe();
+    capturar("default_we");
+
+    // (2) grid_solo — «tudo off menos a grelha» (o pedido do dono da F0)
+    {
+        gldbg::g_masks.master = true;
+        gldbg::g_masks.sky = false;
+        gldbg::g_masks.worldEnv = false;
+        gldbg::g_masks.geometry = false;
+        gldbg::g_masks.gizmos = false;
+        gldbg::g_masks.ui = false;
+        gldbg::g_masks.uiGlass = false;
+        gldbg::g_masks.grid = true;
+        capturar("grid_solo");
+        gldbg::g_masks.master = false;
+        gldbg::g_masks.sky = true;
+        gldbg::g_masks.worldEnv = true;
+        gldbg::g_masks.geometry = true;
+        gldbg::g_masks.gizmos = true;
+        gldbg::g_masks.ui = true;
+        gldbg::g_masks.uiGlass = true;
+    }
+
+    // (3) we_midnight — o tom de chão do céu (a cura da F2: a «zona azul»)
+    env->timeOfDay = 0.0f;
+    capturar("we_midnight");
+    env->timeOfDay = Environment::kTodDefault;
+
+    // (4) fog_dense — a névoa densa (a grelha imune — a F2)
+    env->fogDensity = 0.12f;
+    capturar("fog_dense");
+    env->fogDensity = 0.0f;
+    g_scene.destroy(envH);
+    envH = Handle{};
+    env = nullptr;
+
+    // (5..7) o CLIMA por tipo (o raio longe — o flash não entra no hash)
+    criarClima(AmbientEnvironment::kWeatherRain);
+    capturar("chuva");
+    g_scene.destroy(wxH);
+    wxH = Handle{};
+    criarClima(AmbientEnvironment::kWeatherSnow);
+    capturar("neve");
+    g_scene.destroy(wxH);
+    wxH = Handle{};
+    criarClima(AmbientEnvironment::kWeatherStorm);
+    capturar("trovoada");
+    g_scene.destroy(wxH);
+    wxH = Handle{};
+
+    // (8) cam_borda — a pose extrema (o horizonte da grelha a dist 2500)
+    g_camera.yaw = 2.35f;
+    g_camera.pitch = 0.9f;
+    g_camera.dist = 2500.0f;
+    capturar("cam_borda");
+    poseSempre();
+
+    // (9) pos_recuperacao — o ciclo REAL do device (TERM/INIT) com a cena
+    // reaberta: A MESMA prova da F1-R agora no nível da IMAGEM
+    onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
+    onAppCmd(&g_app, APP_CMD_INIT_WINDOW);
+    loadFixtureFontIfDead();
+    selectCuboByName();
+    criarWe();
+    criarClima(AmbientEnvironment::kWeatherRain);
+    capturar("pos_recuperacao");
+
+    // ---- WRITE: a lista + os PNGs de referência -------------------------
+    if (writeMode) {
+        FILE* f = std::fopen(gpath.c_str(), "w");
+        if (!f) {
+            std::printf("    [FAIL] o ficheiro %s não abre\n", gpath.c_str());
+            return 1;
+        }
+        std::fprintf(f, "# golden_z2 — AS GOLDEN IMAGES da 0.12-Z2 F5 (a "
+                        "regressão por imagem)\n");
+        std::fprintf(f, "# formato: nome hash nonBg distinct meanLum — a "
+                        "maquinaria vive em tests/raster_golden.h\n");
+        std::fprintf(f, "# Mesa: %s | %s\n", glGetString(GL_RENDERER),
+                     glGetString(GL_VERSION));
+        std::fprintf(f, "# regeneração: raster_z2 --golden-write (o "
+                        "protocolo no RELATORIO-0.12-Z2-F5.md §F5.3)\n");
+        for (const Got& g : got) {
+            std::fprintf(f, "%s\n", gogolden::goldenLine(g.e).c_str());
+        }
+        std::fclose(f);
+        for (const Got& g : got) {
+            // o flip (GL lê da base; o PNG de referência é top-down)
+            std::vector<u8> top(g.frame.size());
+            const int row = g.w * 4;
+            for (int y = 0; y < g.h; ++y) {
+                std::memcpy(&top[static_cast<size_t>(y) * row],
+                            &g.frame[static_cast<size_t>(g.h - 1 - y) * row],
+                            row);
+            }
+            const std::vector<u8> png =
+                thumb::encodePngRgba(top.data(), g.w, g.h);
+            const std::string full = pdir + "/golden_" + g.nome + ".png";
+            FILE* pf = std::fopen(full.c_str(), "wb");
+            if (pf) {
+                std::fwrite(png.data(), 1, png.size(), pf);
+                std::fclose(pf);
+            }
+        }
+        std::printf("    WRITE OK: %zu cenas → %s (+ png/)\n", got.size(),
+                    gpath.c_str());
+        return 0;
+    }
+
+    // ---- VERIFY: a lista + os PNGs decodificados → o veredicto ---------
+    std::vector<gogolden::GoldenEntry> ref;
+    {
+        FILE* f = std::fopen(gpath.c_str(), "rb");
+        if (!f) {
+            std::printf("    [FAIL] a lista %s não abre (corre "
+                        "--golden-write no Mesa de referência)\n",
+                        gpath.c_str());
+            return 1;
+        }
+        std::string txt;
+        char buf[4096];
+        size_t n;
+        while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) txt.append(buf, n);
+        std::fclose(f);
+        if (!gogolden::parseGoldenList(txt, ref)) {
+            std::printf("    [FAIL] a lista tem uma linha de dados "
+                        "malformada (o ficheiro podre morre cedo)\n");
+            return 1;
+        }
+    }
+    if (ref.size() != got.size()) {
+        ++failures;
+        std::printf("    [FAIL] a lista tem %zu goldens e a cena produziu "
+                    "%zu — a lista apodreceu (regenera ou corrige)\n",
+                    ref.size(), got.size());
+    }
+    for (const gogolden::GoldenEntry& e : ref) {
+        const Got* g = nullptr;
+        for (const Got& cand : got) {
+            if (cand.nome == e.name) {
+                g = &cand;
+                break;
+            }
+        }
+        if (!g) {
+            ++failures;
+            std::printf("    [FAIL] %s: a cena não correu (a lista e o "
+                        "harness divergiram)\n",
+                        e.name.c_str());
+            continue;
+        }
+        if (g->e.hash == e.hash) {
+            std::printf("    [ok]   %-16s EXATO (hash %016llx)\n",
+                        e.name.c_str(),
+                        static_cast<unsigned long long>(e.hash));
+            continue;
+        }
+        // o hash divergiu — O PNG de referência decide (o diff por píxel
+        // com a política do V9)
+        const std::string pngPath = pdir + "/golden_" + e.name + ".png";
+        FILE* pf = std::fopen(pngPath.c_str(), "rb");
+        if (!pf) {
+            ++failures;
+            std::printf("    [FAIL] %s: hash divergiu e o PNG de referência "
+                        "não existe (%s)\n",
+                        e.name.c_str(), pngPath.c_str());
+            continue;
+        }
+        std::vector<u8> bytes;
+        char buf[8192];
+        size_t n;
+        while ((n = std::fread(buf, 1, sizeof(buf), pf)) > 0)
+            bytes.insert(bytes.end(), buf, buf + n);
+        std::fclose(pf);
+        RawImage img;
+        std::string err;
+        if (!vv::loadPng(bytes.data(), bytes.size(), img, err) || !img.ok()) {
+            ++failures;
+            std::printf("    [FAIL] %s: o PNG de referência não decodifica "
+                        "(%s)\n",
+                        e.name.c_str(), err.c_str());
+            continue;
+        }
+        if (img.width != static_cast<u32>(g->w) ||
+            img.height != static_cast<u32>(g->h)) {
+            ++failures;
+            std::printf("    [FAIL] %s: o PNG é %ux%u e o frame é %dx%d\n",
+                        e.name.c_str(), img.width, img.height, g->w, g->h);
+            continue;
+        }
+        // o PNG de referência é top-down (capturePng); o frame é GL
+        // bottom-up — o flip do PNG para a ordem GL antes do diff
+        std::vector<u8> refGl(img.rgba.size());
+        const int row = g->w * 4;
+        for (int y = 0; y < g->h; ++y) {
+            std::memcpy(&refGl[static_cast<size_t>(y) * row],
+                        &img.rgba[static_cast<size_t>(g->h - 1 - y) * row],
+                        row);
+        }
+        const gogolden::DiffReport d =
+            gogolden::diffRgba(g->frame.data(), refGl.data(), refGl.size());
+        const gogolden::Verdict v = gogolden::verdict(d);
+        if (v == gogolden::Verdict::FALHA) {
+            ++failures;
+            std::printf("    [FAIL] %s: FALHA — diff=%ld px (%.3f%%) "
+                        "maxDelta=%d (a regressão SALTA no diff PNG)\n",
+                        e.name.c_str(), d.diff, d.pct, d.maxDelta);
+            writeDiffPng(*g, refGl);
+        } else if (v == gogolden::Verdict::TOLERANCIA) {
+            std::printf("    [nota] %-16s TOLERANCIA — diff=%ld px (%.3f%%) "
+                        "maxDelta=%d (a política do V9; a Lista e o "
+                        "relatório ficam com a contagem)\n",
+                        e.name.c_str(), d.diff, d.pct, d.maxDelta);
+        }
+    }
+    // a cena EXTRA (o harness a produzir o que a lista não conhece) = a
+    // lista podre — nunca uma golden silenciosamente ignorada
+    for (const Got& g : got) {
+        bool known = false;
+        for (const gogolden::GoldenEntry& e : ref) {
+            if (e.name == g.nome) {
+                known = true;
+                break;
+            }
+        }
+        if (!known) {
+            ++failures;
+            std::printf("    [FAIL] %s: a cena capturada NÃO está na lista "
+                        "(o ficheiro apodreceu — regenera)\n",
+                        g.nome.c_str());
+        }
+    }
+    std::printf("    golden: falhas=%d (de %zu cenas)\n", failures,
+                got.size());
+    prova("golden images concluídas (a lista tests/golden/golden_z2.txt)");
+    check(failures == 0, "as golden images passaram (a regressão por "
+                        "imagem está verde)");
+    return failures;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1327,6 +1694,13 @@ int main(int argc, char** argv) {
     const bool fuzzBMode = argc > 1 && std::strcmp(argv[1], "--fuzzb") == 0;
     const bool sky2Mode = argc > 1 && std::strcmp(argv[1], "--sky2") == 0;
     const bool climaMode = argc > 1 && std::strcmp(argv[1], "--clima") == 0;
+    // FASE 5-Z2: as golden images (a regressão POR IMAGEM) — o --golden
+    // compara contra tests/golden/, o --golden-write regenera (o protocolo
+    // no RELATORIO-0.12-Z2-F5.md §F5.3)
+    const bool goldenMode =
+        argc > 1 && std::strcmp(argv[1], "--golden") == 0;
+    const bool goldenWriteMode =
+        argc > 1 && std::strcmp(argv[1], "--golden-write") == 0;
     const int sky2Poses = argc > 2 ? std::atoi(argv[2]) : 200;
     const int fuzzCycles = argc > 2 ? std::atoi(argv[2]) : 1000;
     const u32 fuzzSeed = argc > 3 ? static_cast<u32>(std::strtoul(argv[3], nullptr, 10)) : 0xC0FFEEu;
@@ -1427,6 +1801,15 @@ int main(int argc, char** argv) {
         const int f = climaRun();
         onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
         std::printf("\n%s (falhas=%d)\n", f ? "CLIMA FALHOU" : "CLIMA OK", f);
+        return f ? 1 : 0;
+    }
+    if (goldenMode || goldenWriteMode) {
+        // FASE 5: as golden images usam o MESMO boot (a mesma cena do
+        // sintoma, a mesma fonte, a mesma seleção)
+        const int f = goldenRun(goldenWriteMode);
+        onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
+        std::printf("\n%s (falhas=%d)\n", f ? "GOLDEN FALHOU" : "GOLDEN OK",
+                    f);
         return f ? 1 : 0;
     }
 

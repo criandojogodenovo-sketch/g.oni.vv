@@ -1,8 +1,9 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-25 · vc: 136 · Último commit: este (a 0.12-Z2 F4 —
-os bugs 4.2, os P2 herdados e a CAIXA NEGRA; o
-RELATORIO-0.12-Z2-F4.md);
+Atualizado: 2026-10-25 · vc: 137 · Último commit: este (a 0.12-Z2 F5 —
+O FECHO da campanha: as golden images, o fix estrutural do build_tests,
+o ASan/glslang e OS 2 GATES que a F4 partiu; o
+RELATORIO-0.12-Z2-F5.md);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -10,74 +11,32 @@ RELATORIO-0.12-Z2-F4.md);
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-Z2 — F4 FECHADA (vc 136)**. OS 9 BUGS 4.2 mortos (o
-  relatório tem a tabela com ficheiro:linha): o «Ver log» ABRE o viewer
-  e o export desceu para ele COM a verificação do ficheiro; o ponto
-  vermelho honesto (o probe() nos opcionais settings.goni/overrides.goni
-  + o ACK errCount() ao abrir a Consola — EngineLog ganha
-  lineCount/errCount); o vp3d cala no arrasto; o RSS=-1 cru morre («não
-  medido»); o relógio do thumb DIVIDIDO (cpu/io — o orçamento 50ms é de
-  CPU); o nome da hierarquia com PISO (não sumia mais); a row Name
-  DUPLICADA do Inspector morta (plano+contagem+desenho em sincronia,
-  pins atualizados com a mutação colada); o chip ⋮ morto (duplicado do
-  Menu); o latch da câmara (break→continue — um dedo num controlo não
-  veta os outros). OS P2 HERDADOS: os contadores gldbg honestos
-  (nascimento real + onDestroyed nos 3; o pin Buffer 5→3); o
-  glassInvalidate ligado ao contrato (recuperação + câmara/rect); o RAII
-  + o varredor de órfãos nos pesados (TmpDirRaii + cleanStaleHeavyTmp —
-  o r039 PROVADO com o limite físico do disco); o ENOSPC limpo (o crash
-  é a corrida suspensa por ordem do dono). A CAIXA NEGRA: .txt+PNG no
-  GLES real (raster FASE C-BB 9 checks), os gatilhos AUTO (recuperação +
-  câmara inválida), o botão em Settings›Diagnóstico, Downloads/
-  GOneVV/blackbox/ no device. AS INFRAESTRUTURAS: GONI_SAN/GONI_OBJ_DIR
-  no build_tests.py (ASan/UBSan) + o aprendido do ABI misturado (rm dos
-  .o a cada mudança de header — o fix estrutural fica para a F5).
-- **Campanha 0.12-Z2 — F1-R FECHADA (vc 134)**. A F1 completa (o rework
-  da F1-original, rebaseado SOBRE a F2 e FUNDO com a F1BIS): a PROVA POR
-  FUZZING — 1500 ciclos (1200 TERM/INIT reais + 300 contextRecover da
-  sonda), 8 cenários (WE × clima × painel), gesto agarrado em ~30%,
-  frame seguinte IDÊNTICO byte a byte em TODOS, input vivo em TODOS (a
-  câmara orbita), RSS plano, 0 TSan. OS 2 P0 MORTOS: o ATLAS FANTASMA
-  (o invalidateAll saltava camadas inválidas × o guard `if (tex_)` do
-  FontAtlas — a UI perdia TODO o texto a partir do 2.º ciclo; o
-  invalidate corre para TODAS e o contador conta TRANSIÇÕES — inv0+1, a
-  R-070 atualizada) e A CENA QUE SUMIA na via da sonda (o blockRebind
-  re-abre pelo meshPath com backoff). A FUSÃO com a F1BIS: o swap()
-  fundido (bool + lastSwapError_ + lastSwapOk_ + o ackSwapLoss
-  anti-duplo-disparo), a sonda afiada POR CAUSA (só CONTEXT_LOST/
-  EGL_BAD_ALLOC; o BAD_SURFACE espera o TERM/INIT), o TERM repõe o
-  input (a mesma cura achada 2× em paralelo), o lifecycle completo,
-  pins ×5 + o z2_audit_term_reseta_input. O harness com o ABORT limpo
-  sem driver. A história no RELATORIO-0.12-Z2-F1.md (§F1-R).
-
-- **Campanha 0.12-Z2 (CONTEXTO GL + WE + CLIMA + AUDITORIA TOTAL) — F3
-  FECHADA (vc 134)**. O CLIMA VISÍVEL: **O ACHADO P0** — o uniform
-  uLifetime NUNCA era carregado pelo draw das partículas (ficava 0.0 →
-  mod(x,0)=NaN → TODOS os vértices morriam no clip — o sistema NÃO
-  desenhava NENHUM píxel no driver real desde a 0.12-Y-F1; o stub do CI
-  conta draws, a prova de píxeis da FASE 3 apanhou) — a cura: o upload
-  ANTES do uTime (R-073, a mutação vermelha ao vivo). O piso em píxeis
-  (kMinParticlePx 3.0, o max() com o w do centro no VS), o emissor a
-  seguir ao OLHAR (followOrigin + uSpawnScale, raios 6/5 pela densidade,
-  o NONE repõe o jorro), o orçamento do FPS (a EMA 50/58 piso 0.25 — SÓ
-  o clima), o spawnRadius no .goni/Inspector (PeSpawn 5448, o rowCount
-  8→9), **o ACHADO F3**: a pausa não congelava os relógios do render
-  (clockFrozen — o contrato Y-E). As provas POR PÍXEL (--clima V1..V10,
-  0 falhas): chuva 1431/neve 1627/trovoada 1986 px, o follow 6984 px a
-  2000 do mundo, o piso 1805 px a 200 m, o contexto EXATO (V9), a pausa
-  (V6) — + o VLM (trovoada/neve visíveis). raster_z2 27/0 · --clima
-  0/0 · --fuzz 150/0 · test_core 0 falhas · c33 1113/0.
-
-- **Campanha 0.12-Z2 (CONTEXTO GL + WE + CLIMA + AUDITORIA TOTAL) —
-  F1-BIS (vc 133), F0/F1 (vc 130/131) e F2 (vc 132) FECHADAS** (a
-  história completa no RELATORIO-0.12-Z2-RASTER.md e no
-  RELATORIO-0.12-Z2-AUDIT.md): a F1-BIS fechou os 9 achados disjuntos
-  do ciclo de vida (R-072); a F1 fez o --fuzz 1050 ciclos de perda REAL
-  com o frame EXATO e o input vivo (R-070 — o invalidateAll saltava a
-  camada falhada); a F2 deu o tom de chão ao céu (a «zona azul fixa»
-  morta — R-071), o varrimento --sky2 200×2 e o «Repor câmara» (⌖ +
-  duplo toque); a F0 construiu o raster_z2 (a engine contra o DRIVER
-  GLES REAL — Mesa/llvmpipe, os píxeis LIDOS, a bisseção por passe).
+- **Campanha 0.12-Z2 — F5 FECHADA (vc 137): O FECHO** (a história no
+  RELATORIO-0.12-Z2-F5.md): as GOLDEN IMAGES — a regressão POR IMAGEM
+  (as 9 cenas douradas determinísticas em tests/golden/ com os PNGs de
+  referência; o veredicto da casa EXATO/TOLERANCIA/FALHA com o diff PNG
+  vermelho; a mutação do kGroundDim 0.95 no FS VERMELHA AO VIVO: 4 cenas
+  FALHA a 47% de diff com grid_solo/clima EXATO — o isolamento provado)
+  + a R-074 (a maquinaria aferrada no test_core: os vetores do FNV da
+  casa, o parser, o veredicto, a máscara) + O FIX ESTRUTURAL do
+  build_tests.py (o rastreio de includes — a dívida da F4.5: o ABI
+  misturado morre) + ASan/UBSan no test_core e no raster + o glslang nos
+  shaders + OS 2 GATES QUE O COMMIT F4 PARTIU REPARADOS (o ui-vocab com
+  a 3.ª encodePngRgb do blackboxWorker — o MESMO padrão do thumb; o
+  release-identity com o §14-z). PROVADO pela API do GitHub: o CI do
+  e593c2f (F4) estava VERMELHO no job core (o ui-vocab) — o worklog da
+  F4 alegava verde; a divergência foi reportada e corrigida NESTE
+  commit.
+- **Campanha 0.12-Z2 — F4 (vc 136), F1-R (vc 135), F3 (vc 134),
+  F1-BIS/F0/F1/F2 (vc 130..133) FECHADAS** (a história COMPLETA nos
+  RELATORIO-0.12-Z2-{F1,F4,RASTER,AUDIT}.md — o índice não é o
+  arquivo): F0 construiu o raster_z2 (a engine contra o DRIVER GLES
+  REAL, os píxeis LIDOS, a bisseção por passe); F1/F1-R o contexto GL
+  por fuzzing 1500 ciclos + o ATLAS FANTASMA + a cena que sumia
+  (R-070); F1-BIS os 9 achados disjuntos do ciclo de vida (R-072); F2
+  o tom de chão do céu + o varrimento 200 poses + o «Repor câmara»
+  (R-071); F3 o P0 do uLifetime + o clima visível + o piso em píxeis
+  (R-073); F4 os 9 bugs 4.2 + os P2 herdados + a CAIXA NEGRA.
 
 - **Campanha 0.12-Y-F2 (O CLIMA E O VENTO) — FECHADA no código
   (vc 124; a história no RELATORIO-0.12-Y-F2-WEATHER.md)** (a cláusula

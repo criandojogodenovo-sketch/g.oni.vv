@@ -1080,3 +1080,29 @@ Prova de mutação (mutacao-R030a-vermelho.txt): `0x2196F3` (o azul órfão da s
 | Teste sentinela | `regress_weather_z2_f3` (tests/test_sentinels.cpp — o fonte: o max() do VS, o orçamento, o follow, os presets, o "rad", o P0 do uLifetime com a ordem do upload) + os pins weather_min_px_pura / weather_follow_pura / weather_budget_mecan / weather_raio_serialize (tests/test_012z2_f3.cpp) + o raster_z2 --clima (V1..V10 — as provas POR PÍXEL no GLES real) |
 | Prova de mutação | o max() do VS removido → R-073 VERMELHO; o upload do uLifetime removido → R-073 VERMELHO («o UPLOAD do uLifetime saiu do draw») — repostos, VERDE (PROVADO na sessão) |
 | Padrão proibido | «uniform de VS sem upload no draw» (o NaN silencioso do mod(x,0)); «tamanho de partícula sem piso em píxeis»; «clima preso à origem do TIC»; «orçamento de FPS a tocar o emissor do utilizador»; «default de campo novo que muda o .goni antigo» |
+
+## R-074 · A MAQUINARIA DAS GOLDEN IMAGES AFERRADA (0.12-Z2 F5)
+
+| | |
+|---|---|
+| ID | R-074 |
+| Reportado | o prompt da campanha 0.12-Z2 (FASE 5: «golden images 回归 + sentinela com mutação») |
+| Sintoma vigiado | a regressão POR IMAGEM a apodrecer em silêncio: o hash das goldens a divergir do frameHash/V9 (o contrato a mentir sobre si próprio), a tolerância da casa afrouxada (o céu partido a passar), o modo golden desligado do harness, o verify a comparar contra um PNG que nunca decodifica (o falso verde), os pins runtime da maquinaria saídos do test_core |
+| Causa (classe vigiada) | tests/raster_golden.h (os constantes do FNV da casa 1469598103934665603/1099511628211, o kTolPct 0.5/kTolMaxDelta 32 do V9, os três ramos do veredicto, o diffRgba, o caminho tests/golden/golden_z2.txt) + tests/raster_z2.cpp (o --golden/--golden-write, o gogolden::fnv1a64 no capturar, o vv::loadPng + gogolden::diffRgba no verify) + tests/test_012z2_f5.cpp (os 4 pins runtime) |
+| Fix | a sentinela `regress_golden_z2_f5` (tests/test_sentinels.cpp) — o fonte das 3 peças + os 9 EXPECT |
+| Teste sentinela | `regress_golden_z2_f5` (tests/test_sentinels.cpp) + os pins golden_fnv_conhecido / golden_parse_roundtrip / golden_veredicto / golden_mask_diff (tests/test_012z2_f5.cpp) + o `raster_z2 --golden` (9/9 EXATO no GLES real — o determinismo byte a byte) |
+| Prova de mutação | (1) a mutação AO VIVO NO RENDER (o kGroundDim 0.45→0.95 na cópia GLSL do FS do céu — a regressão da F2): --golden FALHOU com 4 cenas a 47% de diff (maxDelta 113) e os diff PNGs vermelhos, com grid_solo/chuva/neve/trovoada/cam_borda EXATO — o isolamento por cena provado; reposto, 9/9 EXATO. (2) A mutação NA MAQUINARIA (os constantes/tolerância/remover o loadPng): R-074 VERMELHA no test_core por construção do pin |
+| Padrão proibido | «hash das goldens ≠ frameHash (dois algoritmos = o contrato a mentir)»; «tolerância afrouxada sem decisão do dono»; «golden sem diff PNG na FALHA»; «verify sem decodificar a referência»; «ficheiro dourado com linha podre aceite em silêncio» |
+
+## R-075 · O UTF8DECODE SÓ LÊ OS BYTES QUE A SEQUÊNCIA EXIJE (0.12-Z2 F5)
+
+| | |
+|---|---|
+| ID | R-075 |
+| Reportado | a auditoria ASan/UBSan da F5 (o comando GONI_SAN no build_tests.py — a infraestrutura da F4 executada) — o ASan apanhou o overflow AO VIVO no `regress_glyph_coverage` |
+| Sintoma vigiado | a LEITURA ALÉM DO FIM em texto malformado: o utf8Decode lia s[1], s[2] e s[3] INCONDICIONALMENTE antes de classificar o lead byte — um 0xFF (ou qualquer lead inválido) no FIM de um buffer de texto lia 3 bytes além do fim (o caminho vivo no device: todo o texto da UI passa por aqui). ASan: «global-buffer-overflow READ of size 1 … 0 bytes after '*.LC485' (size 2) in vv::utf8Decode» |
+| Causa (ficheiro:linha) | app/src/main/cpp/ui/FontAtlas.h utf8Decode — os 3 loads `static_cast<unsigned char>(s[1..3])` fora de qualquer guarda do lead |
+| Fix | o `need` (os bytes de continuação que o lead EXIJE: 1/2/3, ou 0 = lead inválido → FFFD com bytes=1 sem ler MAIS NADA) + o loop que lê e valida cada continuação à vez. O RESULTADO é idêntico em TODAS as entradas (o mesmo code point e o mesmo *bytes) — as leituras é que são as mínimas. Zero mudança de render: as golden images 9/9 EXATO pós-fix |
+| Teste sentinela | `regress_glyph_coverage` sob ASan (o pino do 0xFF solitário já existia — o ASan é que o tornava vermelho) + a sentinela `regress_utf8_z2_f5` (tests/test_sentinels.cpp — o fonte: o `need` presente, o load incondicional de s[3] PROIBIDO) |
+| Prova de mutação | repor os 3 loads incondicionais → o `regress_utf8_z2_f5` VERMELHO («o load incondicional de s[3] voltou») e o `regress_glyph_coverage` sob ASan VERMELHO (o overflow volta). Reposto: ASan 1258/0 (exit 0), série 0 falhas, golden 9/9 EXATO |
+| Padrão proibido | «byte de continuação lido sem o lead autorizar»; «decodificador UTF-8 que avança s[i] fora da classe do lead» |

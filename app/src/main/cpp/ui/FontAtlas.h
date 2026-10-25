@@ -58,31 +58,42 @@ inline u32 utf8Decode(const char* s, u32* bytes) {
         *bytes = 1;
         return c0;
     }
-    const unsigned char c1 = static_cast<unsigned char>(s[1]);
-    if ((c0 & 0xE0u) == 0xC0u && (c1 & 0xC0u) == 0x80u) {
-        *bytes = 2;
+    // 0.12-Z2 F5 (o ACHADO F5-B do ASan): o lead byte SÓ autoriza a
+    // leitura dos bytes da PRÓPRIA sequência — a versão antiga lia
+    // s[1..3] SEMPRE (um 0xFF solitário no FIM de um buffer de texto lia
+    // 3 bytes além do fim; o regress_glyph_coverage sob ASan apanhou-o).
+    // O RESULTADO é idêntico em TODAS as entradas (o mesmo code point e o
+    // mesmo *bytes) — as leituras é que passam a ser as mínimas.
+    const int need = (c0 & 0xE0u) == 0xC0u ? 1
+                   : (c0 & 0xF0u) == 0xE0u ? 2
+                   : (c0 & 0xF8u) == 0xF0u ? 3
+                                           : 0;
+    if (need == 0) {
+        *bytes = 1;   // lead inválido — avança 1 byte (nunca crash, nunca loop)
+        return 0xFFFDu;
+    }
+    unsigned char c[3] = {0u, 0u, 0u};
+    for (int i = 1; i <= need; ++i) {
+        c[i - 1] = static_cast<unsigned char>(s[i]);
+        if ((c[i - 1] & 0xC0u) != 0x80u) {
+            *bytes = 1;   // malformado — avança 1 byte (nunca crash, nunca loop)
+            return 0xFFFDu;
+        }
+    }
+    *bytes = static_cast<u32>(need + 1);
+    if (need == 1) {
         return (static_cast<u32>(c0 & 0x1Fu) << 6) |
-                static_cast<u32>(c1 & 0x3Fu);
+                static_cast<u32>(c[0] & 0x3Fu);
     }
-    const unsigned char c2 = static_cast<unsigned char>(s[2]);
-    if ((c0 & 0xF0u) == 0xE0u && (c1 & 0xC0u) == 0x80u &&
-        (c2 & 0xC0u) == 0x80u) {
-        *bytes = 3;
+    if (need == 2) {
         return (static_cast<u32>(c0 & 0x0Fu) << 12) |
-                (static_cast<u32>(c1 & 0x3Fu) << 6) |
-                static_cast<u32>(c2 & 0x3Fu);
+               (static_cast<u32>(c[0] & 0x3Fu) << 6) |
+                static_cast<u32>(c[1] & 0x3Fu);
     }
-    const unsigned char c3 = static_cast<unsigned char>(s[3]);
-    if ((c0 & 0xF8u) == 0xF0u && (c1 & 0xC0u) == 0x80u &&
-        (c2 & 0xC0u) == 0x80u && (c3 & 0xC0u) == 0x80u) {
-        *bytes = 4;
-        return (static_cast<u32>(c0 & 0x07u) << 18) |
-                (static_cast<u32>(c1 & 0x3Fu) << 12) |
-                (static_cast<u32>(c2 & 0x3Fu) << 6) |
-                static_cast<u32>(c3 & 0x3Fu);
-    }
-    *bytes = 1;   // malformado — avança 1 byte (nunca crash, nunca loop)
-    return 0xFFFDu;
+    return (static_cast<u32>(c0 & 0x07u) << 18) |
+           (static_cast<u32>(c[0] & 0x3Fu) << 12) |
+           (static_cast<u32>(c[1] & 0x3Fu) << 6) |
+            static_cast<u32>(c[2] & 0x3Fu);
 }
 
 class FontAtlas {

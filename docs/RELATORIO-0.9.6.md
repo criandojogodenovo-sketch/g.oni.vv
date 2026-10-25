@@ -1012,3 +1012,35 @@ gates VERDES · **versionCode 135** — o par declarado aqui e no build
 config (a §14-w é a F1BIS e a §14-x é a F3; esta é a F1-R rebaseada
 por cima de ambas, com o swap() fundido, a sonda afiada por causa e
 o ackSwapLoss).
+
+### §14-z — 0.12-Z2 F5 (o FECHO da campanha: golden images, ASan/glslang, os gates reparados) — versionCode 137
+
+**G8** (o par declarado no MESMO commit, a regra do §14): a FASE 5 da
+campanha Z2 (o RELATORIO-0.12-Z2-F5.md — o relatório de fecho com os
+critérios de aceitação do prompt um a um): as GOLDEN IMAGES — a
+regressão POR IMAGEM (tests/raster_golden.h + tests/golden/golden_z2.txt
++ 9 PNGs de referência; o veredicto da casa EXATO/TOLERANCIA/FALHA com o
+diff PNG vermelho; --golden compara, --golden-write regenera; 9/9 EXATO
+no GLES real e o hash da pos_recuperacao = o hash do V9 do clima — a
+mesma determinística) com a R-074 a aferrar a maquinaria e a mutação
+AO VIVO do kGroundDim 0.95 a falhar 4 cenas a 47% (grid_solo EXATO — o
+isolamento por cena provado). A R-075: o utf8Decode SÓ lê os bytes que
+a sequência exije (o ACHADO F5-B do ASan — o load incondicional de
+s[1..3] lia além do fim em texto malformado; resultado idêntico em
+todas as entradas, golden 9/9 EXATO pós-fix). OS ACHADOS DO AUDIT
+ASAN/UBSAN (a infraestrutura da F4 executada: GONI_SAN=… 1258 testes,
+exit 0, 0 leaks): F5-A o registo de ícones com 9 nPts errados (o
+kKeyboardPts 32 lia 64 floats sobre um array de 48 — overflow apanhado
+pelo icones_conjunto sob ASan; kResetPts 28 sobre 28 floats; os outros
+7 sub-declaravam — metadados corrigidos, o desenho usa as LINES). O fix
+estrutural da F4.5: o build_tests.py rastreia os includes (o fecho de
+#include "…" manda no mtime do .o — o ABI misturado morre). O
+glslangValidator (scripts/glslang_check.py NOVO): 12 shaders GLSL ES
+300, 0 violações. OS 2 GATES que o commit da F4 partiu REPARADOS (a
+divergência do worklog PROVADA pela API do GitHub: o job core do
+e593c2f estava VERMELHO): o ui-vocab aceita a 3.ª encodePngRgb SÓ no
+worker da caixa negra (o MESMO padrão do thumb — o hot path continua
+vermelho) e o release-identity fecha com este §14-z. raster_z2 36/0 ·
+--golden 9/9 EXATO · --sky2 200/0 · --clima 0/0 · --fuzz 150/0 ·
+test_core 0 falhas · c33_virtual 1113/0 · ASan/UBSan 1258/0 · gates
+VERDES · **versionCode 137** — o par declarado aqui e no build config.

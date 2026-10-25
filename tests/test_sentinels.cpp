@@ -9702,3 +9702,121 @@ TEST(regress_weather_z2_f3) {
         }
     }
 }
+
+// R-074 — regress_golden_z2_f5 (0.12-Z2 FASE 5): A REGRESSÃO POR IMAGEM —
+// a maquinaria das golden images (tests/raster_golden.h) e o modo --golden
+// do raster_z2 aferrados NO FONTE (o CI não tem Mesa, mas o contrato tem
+// de viver). As mutações que este pin mata: (1) os constantes do FNV-1a 64
+// mudados (o hash das goldens divergia do frameHash/V9 — o contrato a
+// mentir sobre si próprio); (2) a tolerância da casa afrouxada (o 0.5%/32
+// do V9 — o céu partido a passar); (3) o modo golden saído do harness (a
+// regressão por imagem desligada); (4) o hash das goldens a ser um
+// ad-hoc em vez da maquinaria; (5) o verify a comparar contra um PNG que
+// nunca decodifica (o falso verde). A prova de mutação AO VIVO (o kGroundDim
+// 0.45→0.95 do FS, a regressão da F2): 4 cenas FALHA (47% diff, maxDelta
+// 113), os diff PNGs saem, grid_solo/clima/cam_borda ficam EXATO — e a
+// R-074 continua VERDE porque o QUE ela aferra é a maquinaria, não o céu
+// (o céu é aferido pela R-071 e pelo próprio golden).
+TEST(regress_golden_z2_f5) {
+    {
+        std::string src;
+        EXPECT(readFileText(REPO_ROOT "/tests/raster_golden.h", src));
+        const std::string code = test::stripCppComments(src);
+        // (1) o FNV-1a 64 É o do frameHash (o MESMO algoritmo do V9)
+        EXPECT_MSG(code.find("1469598103934665603ull") != std::string::npos &&
+                       code.find("1099511628211ull") != std::string::npos,
+                   "R-074: os constantes do FNV-1a 64 saíram (o hash das "
+                   "goldens divergiu do frameHash/V9 — o contrato a mentir "
+                   "sobre si próprio)");
+        // (2) a tolerância da casa (o V9: 0.5% e maxDelta ≤32) não afrouxa
+        EXPECT_MSG(code.find("kTolPct = 0.5") != std::string::npos &&
+                       code.find("kTolMaxDelta = 32") != std::string::npos,
+                   "R-074: a tolerância da casa afrouxou (o 0.5%%/32 do V9 "
+                   "é o contrato — afrouxar é a regressão a passar)");
+        // (3) o veredicto tem os TRÊS ramos (o FALHA é o que mata)
+        EXPECT_MSG(code.find("Verdict::TOLERANCIA") != std::string::npos &&
+                       code.find("Verdict::FALHA") != std::string::npos &&
+                       code.find("Verdict::EXATO") != std::string::npos,
+                   "R-074: um ramo do veredicto saiu (o EXATO/TOLERANCIA/"
+                   "FALHA é a política da casa)");
+        // (4) o diff RGBA compara os 4 CANAIS byte a byte (o maxDelta é o
+        // maior salto por canal — um diff que olhe só um canal deixa o céu
+        // partido passar)
+        EXPECT_MSG(code.find("inline DiffReport diffRgba") !=
+                       std::string::npos,
+                   "R-074: o diffRgba saiu da maquinaria (o diff por canal "
+                   "é o que separa a TOLERANCIA do FALHA)");
+        // (5) o ficheiro dourado é O caminho do contrato
+        EXPECT_MSG(code.find("tests/golden/golden_z2.txt") !=
+                       std::string::npos,
+                   "R-074: o caminho da lista dourada saiu (a lista é "
+                   "tests/golden/golden_z2.txt — o contrato do ficheiro)");
+    }
+    {
+        std::string rz;
+        EXPECT(readFileText(REPO_ROOT "/tests/raster_z2.cpp", rz));
+        const std::string rzc = test::stripCppComments(rz);
+        // (6) o modo golden VIVO no harness (a regressão por imagem não
+        // desliga)
+        EXPECT_MSG(rzc.find("--golden") != std::string::npos &&
+                       rzc.find("goldenRun(") != std::string::npos &&
+                       rzc.find("--golden-write") != std::string::npos,
+                   "R-074: o modo golden saiu do raster_z2 (a regressão "
+                   "por imagem desligada)");
+        // (7) o hash das goldens passa PELA maquinaria (não um hash ad hoc
+        // — a mesma fonte do FNV para o V9 e para as goldens)
+        EXPECT_MSG(rzc.find("gogolden::fnv1a64(px.data(), px.size())") !=
+                       std::string::npos,
+                   "R-074: o hash das goldens deixou de passar pela "
+                   "maquinaria (um hash ad hoc diverge do V9 sem ninguém "
+                   "notar)");
+        // (8) o verify compara CONTRA O PNG DECODIFICADO (loadPng — o
+        // falso verde do hash-que-nunca-confere morre)
+        EXPECT_MSG(rzc.find("vv::loadPng(") != std::string::npos &&
+                       rzc.find("gogolden::diffRgba(") != std::string::npos,
+                   "R-074: o verify deixou de decodificar/comparar o PNG "
+                   "de referência (o falso verde do hash sem imagem)");
+    }
+    {
+        // (9) o pino RUNTIME da maquinaria vive e corre no test_core (os
+        // vetores canónicos do FNV, o parser, os veredictos, a máscara)
+        std::string t5;
+        EXPECT(readFileText(REPO_ROOT "/tests/test_012z2_f5.cpp", t5));
+        EXPECT_MSG(t5.find("golden_fnv_conhecido") != std::string::npos &&
+                       t5.find("golden_parse_roundtrip") !=
+                           std::string::npos &&
+                       t5.find("golden_veredicto") != std::string::npos &&
+                       t5.find("golden_mask_diff") != std::string::npos,
+                   "R-074: os pins runtime da maquinaria saíram do "
+                   "test_core (o FNV/parser/veredicto/máscara sem prova)");
+    }
+}
+
+// R-075 — regress_utf8_z2_f5 (0.12-Z2 F5): O UTF8DECODE SÓ LÊ OS BYTES
+// QUE A SEQUÊNCIA EXIJE — o ACHADO F5-B do ASan (o load incondicional de
+// s[1..3] lia além do fim num byte malformado no fim de um buffer; o
+// regress_glyph_coverage sob ASan apanhou-o AO VIVO). A cura (o `need`
+// pela classe do lead) tem de ficar NO FONTE: a mutação (repor o load
+// incondicional de s[3]) fica VERMELHA aqui.
+TEST(regress_utf8_z2_f5) {
+    std::string src;
+    EXPECT(readFileText(REPO_ROOT "/app/src/main/cpp/ui/FontAtlas.h", src));
+    const std::string code = test::stripCppComments(src);
+    // a cura VIVA: o `need` pela classe do lead (1/2/3, 0 = inválido)
+    EXPECT_MSG(code.find("const int need = (c0 & 0xE0u) == 0xC0u ? 1") !=
+                   std::string::npos,
+               "R-075: o `need` saiu do utf8Decode (a cura do ACHADO F5-B "
+               "foi desfeita — os bytes voltam a ler-se sem o lead "
+               "autorizar)");
+    // o load INCONDICIONAL de s[3] PROIBIDO (a mutação exata do achado:
+    // `static_cast<unsigned char>(s[3]);` numa linha própria sem guarda)
+    EXPECT_MSG(code.find("const unsigned char c3 = "
+                         "static_cast<unsigned char>(s[3]);") ==
+                   std::string::npos,
+               "R-075: o load incondicional de s[3] voltou (o overflow "
+               "além do fim em texto malformado volta com ele)");
+    // o FFFD com bytes=1 no lead inválido (o contrato do iterador: nunca
+    // crash, nunca loop, sempre avança)
+    EXPECT_MSG(code.find("return 0xFFFDu;") != std::string::npos,
+               "R-075: o U+FFFD saiu (o contrato do decodificador morreu)");
+}

@@ -42,10 +42,73 @@ def src_list():
             uniq.append(rp)
     return uniq
 
+# F5-Z2: o rastreio de includes (o fix estrutural da F4.5) — o fecho de
+# #include "..." de cada fonte manda no mtime do .o. Os includes <> do
+# sistema (glibc/STL/GLES stub) ficam FORA (não são nossos).
+INC_DIRS = [
+    os.path.join(REPO, "app/src/main/cpp"),
+    os.path.join(REPO, "tests"),
+    os.path.join(REPO, "tests/stub"),
+    os.path.join(REPO, "app/src/main/cpp/vendor"),
+    os.path.join(REPO, "app/src/main/cpp/vendor/etcpak"),
+    os.path.join(REPO, "app/src/main/cpp/vendor/astc-encoder"),
+    os.path.join(REPO, "app/src/main/cpp/assets"),
+]
+_INC_RE = re.compile(r'^\s*#\s*include\s*"([^"]+)"', re.M)
+_inc_cache = {}
+
+
+def local_includes(path):
+    out = _inc_cache.get(path)
+    if out is not None:
+        return out
+    out = []
+    try:
+        txt = open(path, encoding="utf-8", errors="replace").read()
+    except OSError:
+        _inc_cache[path] = out
+        return out
+    for name in _INC_RE.findall(txt):
+        cands = [os.path.join(os.path.dirname(path), name)]
+        cands += [os.path.join(d, name) for d in INC_DIRS]
+        for c in cands:
+            if os.path.isfile(c):
+                out.append(os.path.realpath(c))
+                break
+    _inc_cache[path] = out
+    return out
+
+
+def dep_mtime(src):
+    """o mtime NOVO do fecho de includes (DFS com memoização) — o ABI
+    misturado morre: o .o recompila quando QUALQUER header do caminho é
+    mais novo que ele."""
+    newest = os.path.getmtime(src)
+    seen = set()
+    stack = local_includes(src)
+    while stack:
+        h = stack.pop()
+        if h in seen:
+            continue
+        seen.add(h)
+        try:
+            m = os.path.getmtime(h)
+        except OSError:
+            continue
+        if m > newest:
+            newest = m
+        stack.extend(local_includes(h))
+    return newest
+
+
 def compile_one(src):
     rel = src[len(REPO):].lstrip(os.sep).replace(os.sep, "_")
     obj = os.path.join(OBJ, rel + ".o")
-    if os.path.exists(obj) and os.path.getmtime(obj) >= os.path.getmtime(src):
+    # F5-Z2 (a dívida da F4.5): o build agora RASTREIA os includes — o
+    # .o recompila quando QUALQUER header do fecho de #include "..." muda.
+    # A lição colada no RELATORIO-0.12-Z2-F4.md §F4.5: objetos velhos com
+    # headers novos = ABI misturado = SEGV (o crash tc7/tc8 do Inspector).
+    if os.path.exists(obj) and os.path.getmtime(obj) >= dep_mtime(src):
         return obj, None
     cmd = ["g++-14", "-std=c++17", "-O1", "-DNDEBUG",
            *os.environ.get("GONI_SAN", "").split(),  # F4-Z2: ASan/UBSan

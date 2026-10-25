@@ -1,0 +1,13 @@
+# golden_z2 — AS GOLDEN IMAGES da 0.12-Z2 F5 (a regressão por imagem)
+# formato: nome hash nonBg distinct meanLum — a maquinaria vive em tests/raster_golden.h
+# Mesa: llvmpipe (LLVM 19.1.7, 256 bits) | OpenGL ES 3.2 Mesa 25.0.7-2+deb13u1
+# regeneração: raster_z2 --golden-write (o protocolo no RELATORIO-0.12-Z2-F5.md §F5.3)
+default_we 2168dc2f3bef9570 10449 1145 0.283491
+grid_solo edf7fbcfa947fca2 6700 344 0.075220
+we_midnight 014e805d029d0b7f 10182 527 0.064922
+fog_dense 9c25de15e0240ea0 10449 1222 0.266298
+chuva 68de0ba1f5438696 9092 437 0.123572
+neve 4feb3bc97386f9f1 9246 528 0.125514
+trovoada 956bdcfb8af2afed 9120 464 0.123774
+cam_borda 3c742c050d793d1a 28689 402 0.093847
+pos_recuperacao 8115ac2c7aa9db76 10551 1233 0.284075

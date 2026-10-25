@@ -118,9 +118,12 @@ def main() -> int:
                 bad += 1
                 print(f"  FALHOU  {rel}: {pat} — {why}")
     # (M12) a CAPTURA fora do hot path: em main.cpp o encodePngRgb vive
-    # SÓ (1) no worker do thumb (assíncrono — D7) e (2) no export de layout
-    # (diagnóstico PEDIDO — nunca corre no frame). Uma 3.ª chamada (ou o
-    # encode fora do worker) = a captura voltou ao hot path do render.
+    # SÓ (1) no worker do thumb (assíncrono — D7), (2) no export de layout
+    # (diagnóstico PEDIDO — nunca corre no frame) e, desde a F4-Z2, (3) no
+    # worker da CAIXA NEGRA (o MESMO padrão do thumb: o frame GL entrega o
+    # rgba cru no PONTO SEGURO; o flip+encode+escrita vivem no thread de
+    # jobs — platform/main.cpp blackboxWorker). O encode NO FRAME do render
+    # segue VERMELHO — a mutação M12.
     main_cpp = strip_comments(
         (ROOT / "app/src/main/cpp/platform/main.cpp").read_text(encoding="utf-8"))
     n_enc = main_cpp.count("encodePngRgb")
@@ -128,11 +131,16 @@ def main() -> int:
     worker_end = main_cpp.find("static void thumbJobReap")
     enc_in_worker = (worker_start >= 0 and worker_end > worker_start and
                      main_cpp[worker_start:worker_end].count("encodePngRgb") == 1)
-    if n_enc != 2 or not enc_in_worker:
+    bb_start = main_cpp.find("static void blackboxWorker")
+    bb_end = main_cpp.find("static void blackboxCaptureIfPending")
+    enc_in_bb = (bb_start >= 0 and bb_end > bb_start and
+                 main_cpp[bb_start:bb_end].count("encodePngRgb") == 1)
+    if n_enc != 3 or not enc_in_worker or not enc_in_bb:
         bad += 1
         print(f"  FALHOU  platform/main.cpp: encodePngRgb ×{n_enc} fora do "
-              f"padrão (1 no worker do thumb + 1 no export de layout) — a "
-              f"captura no hot path do render é a mutação M12")
+              f"padrão (1 no worker do thumb + 1 no export de layout + 1 "
+              f"no worker da caixa negra, cada um no SEU thread de jobs) — "
+              f"a captura no hot path do render é a mutação M12")
 
     # (D15 · 0.9.6.19) A TABELA DO MENU é PT: os fragmentos EN na tabela
     # kMenu (e nos rótulos dinâmicos) do drawFileMenu são VERMELHOS. A
