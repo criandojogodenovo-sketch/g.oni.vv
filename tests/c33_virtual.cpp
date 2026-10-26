@@ -9073,15 +9073,20 @@ int main() {
             drawTics(Mat4::mul(proj25, view25), g_camera.eye(), view25, proj25, 0.0f);   // F3-Z2
             // O PIN DO BLEND: o passe do vidro ligou o blend clássico com
             // a escrita de depth OFF (o 1.º drawMesh do blend)
-            check(glstub::stats.blendFuncCalls - blendAntes == 1,
-                  "25.2b 1 glBlendFunc (SÓ o material BLEND mistura)");
+            // 0.12-W-1: a grelha (a janela GL exata) e o céu DEFAULT
+            // (sem WE) entraram NO drawTics — os contadores contam-nos:
+            // blendFunc = a grelha + o material BLEND
+            check(glstub::stats.blendFuncCalls - blendAntes == 2,
+                  "25.2b 2 glBlendFunc (a grelha da W-1 + o material BLEND)");
             check(glstub::stats.lastBlendSrc == GL_SRC_ALPHA &&
                       glstub::stats.lastBlendDst == GL_ONE_MINUS_SRC_ALPHA,
                   "25.2c o par SRC_ALPHA/ONE_MINUS_SRC_ALPHA (o MESMO do "
                   "grid/UI)");
-            check(glstub::stats.depthMaskCalls - dmAntes == 2,
-                  "25.2d o depthMask FALSE→TRUE do blend (a mistura não "
-                  "escreve depth)");
+            // depthMask = céu (2) + grelha (2) + blend (2) — cada passe
+            // fecha a sua janela (FALSE→TRUE)
+            check(glstub::stats.depthMaskCalls - dmAntes == 6,
+                  "25.2d 6 depthMask (céu+grelha da W-1+blend — cada passe "
+                  "fecha a sua janela)");
             // O PIN DAS PROPS: as uniforms do lit receberam o material
             check(glstub::stats.uniform4fCalls - u4fAntes == 2,
                   "25.2e uBaseColor definido EM AMBOS os draws (nunca o "
@@ -9102,17 +9107,22 @@ int main() {
                       glstub::stats.lastMatrix2fv[2] > -3.01f,
                   "25.2h O PIN: uUvRot = rot90·scale(2,3) column-major "
                   "(0,2,−3,0 — o shader recebe a MESMA matriz do pin puro)");
-            check(glstub::stats.uniform2fCalls - u2fAntes == 2 &&
+            // u2f = a grelha (o fade 2f) + os 2 draws do lit; a ÚLTIMA é
+            // do MESH (a grelha desenha ANTES — a ordem W-1)
+            check(glstub::stats.uniform2fCalls - u2fAntes == 3 &&
                       glstub::stats.lastUniform2f[0] > 0.24f &&
                       glstub::stats.lastUniform2f[0] < 0.26f &&
                       glstub::stats.lastUniform2f[1] > 0.49f &&
                       glstub::stats.lastUniform2f[1] < 0.51f,
-                  "25.2i uUvOff = (0.25, 0.5) (o offset do transform)");
+                  "25.2i uUvOff = (0.25, 0.5) (o offset do transform — o "
+                  "último 2f é do mesh: a grelha da W-1 passou antes)");
             // O PIN DO TWO-SIDED: SÓ a folha (MASK) desliga o cull — e o
             // draw RESTAURA (o estado GL nunca fica a vingar)
-            check(glstub::stats.cullDisableCalls - cdAntes == 1,
-                  "25.2j O PIN: 1 glDisable(GL_CULL_FACE) — só o material "
-                  "two-sided (o BLEND não o é)");
+            // cullDisable = céu + grelha + a folha two-sided (os 3
+            // repõem — 25.2k abaixo aferra o estado final)
+            check(glstub::stats.cullDisableCalls - cdAntes == 3,
+                  "25.2j 3 glDisable(GL_CULL_FACE) (céu+grelha da W-1+o "
+                  "material two-sided — todos repõem)");
             check(glstub::stats.cullEnabled,
                   "25.2k o cull RESTAURADO no fim do draw (o estado limpo)");
         }

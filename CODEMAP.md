@@ -2,48 +2,26 @@
 
 Atualizado: 2026-10-26 · vc: 138
 
-> 0.12-W-1: A ARQUITETURA DO CÉU E DO CLIMA — o
-> app/src/main/cpp/render/SkyRenderer.h ganha A FONTE ÚNICA do
-> mapeamento WE→params (Params::fromEnvironment: sem WorldEnvironment
-> os defaults da casa tod 12.0/cobertura 0.3; com WE o override — a
-> decisão 1 do dono) + A LUA (moonDirFromTime/moonDisk/moonPhaseLit —
-> as fases pelo terminador, o glow) + o limiar das estrelas do
-> starDensity (starThreshFromDensity) + a INVERSA dirToNdc (as sondas
-> de píxel); o FS (render/SkyRenderer.cpp) ganha `precision highp
-> int;` (O ACHADO GPU: int/uint MEDIUMP matavam o hash das
-> nuvens/estrelas no rasterizador real — os elementos celestes NUNCA
-> desenharam no GPU antes da W-1). O AmbientEnvironment
-> (app/src/main/cpp/components/AmbientEnvironment.h) é o CONTROLADOR
-> com o ALVO POR NOME (targetEmitter — findWeatherTarget/
-> applyWeatherToTarget no app/src/main/cpp/core/Presets.cpp: o MESMO
-> TIC primeiro, o NOME depois, o warn edge-triggered 1×; o preset
-> WeatherController no menu "+"). A GRELHA (app/src/main/cpp/render/
-> Grid.cpp) desenha DENTRO do drawTics (céu→grelha→geometria) com a
-> janela GL EXATA da W-1. Pins: test_012w1_arch + R-076 + o raster
-> --w1.
-> 0.12-Y-F2: o
-> app/src/main/cpp/components/WindTIC.h (o vento GLOBAL, a fonte pura
-> windVector) + o app/src/main/cpp/components/AmbientEnvironment.h (o
-> clima CONFIGURA o ParticleEmitter do MESMO TIC — applyWeatherPreset/
-> updateStorm; presets Wind/Rain/Snow/Storm); o uWind no
-> app/src/main/cpp/render/ParticleShader.h + o uThunderFlash no
-> app/src/main/cpp/render/SkyRenderer.cpp (FLASH DE ECRÃ). Pins:
-> test_012y_f2 + R-064.
+> 0.12-W-1: A ARQUITETURA DO CÉU E DO CLIMA — a FONTE ÚNICA WE→params
+> (app/src/main/cpp/render/SkyRenderer.h Params::fromEnvironment) +
+> a LUA/estrelas do utilizador (moonPhaseLit/starThreshFromDensity +
+> a INVERSA dirToNdc) + `precision highp int;` no FS (O ACHADO GPU:
+> int/uint MEDIUMP matavam o hash das nuvens/estrelas) + o CONTROLADOR
+> do clima por NOME (app/src/main/cpp/components/AmbientEnvironment.h
+> targetEmitter + findWeatherTarget no app/src/main/cpp/core/Presets.cpp)
+> + a GRELHA (app/src/main/cpp/render/Grid.cpp) na janela GL EXATA.
+> Pins: tests/test_012w1_arch.cpp + R-076 + o raster --w1.
 > 0.12-V: a composição parent∘local tem FONTE ÚNICA no
-> app/src/main/cpp/core/TransformSystem.h (composeWorld — o tick E o
-> feedback do gizmo/Inspector partilham; worldToLocalPos é a inversa
-> TRS do pai); a geometria do gizmo (a TRANSLAÇÃO do world + a fórmula
-> dist·tan(fov/2)·k do app/src/main/cpp/ui/Gizmo.h) vive no gizmoAnchor
-> do main (o MESMO par no hit e no draw); pins: test_012v_viewport.
-> 0.12-E (E-1 · EMERGÊNCIA): o SDF de widget (D-1), o vidro (D-2) e o
-> fogo (D-3) estão DORMENTES (a ordem do dono abortou o SDF 3D) — ZERO
-> chamadores: o app/src/main/cpp/ui/Sdf.h, o app/src/main/cpp/render/
-> SdfBatch.h, o app/src/main/cpp/ui/Glass.h, o
-> app/src/main/cpp/ui/Fire.h e os emissores sdfWidget/glassPanelFake/
-> sdfFireBorder/fireGlowBelow/drawEmbers. O desenho do produto é o
-> SIMPLES 2D (Y-1) + os EFEITOS 2.5D da E-3 (o app/src/main/cpp/ui/
-> Noise2D.h, fireBorder2D, dropShadow). O LOGO de D-4
-> (app/src/main/cpp/ui/Brand.h/.cpp) segue VIVO (2D).
+> app/src/main/cpp/core/TransformSystem.h (composeWorld +
+> worldToLocalPos); a geometria do gizmo (a fórmula dist·tan(fov/2)·k
+> do app/src/main/cpp/ui/Gizmo.h) vive no gizmoAnchor do main; pins:
+> test_012v_viewport.
+> 0.12-E (E-1 · EMERGÊNCIA): o SDF (D-1), o vidro (D-2) e o fogo (D-3)
+> estão DORMENTES — ZERO chamadores: o app/src/main/cpp/ui/Sdf.h, o
+> app/src/main/cpp/render/SdfBatch.h, o app/src/main/cpp/ui/Glass.h, o
+> app/src/main/cpp/ui/Fire.h e os emissores. VIVEM o desenho SIMPLES
+> 2D (Y-1), os EFEITOS 2.5D da E-3 (o app/src/main/cpp/ui/Noise2D.h) e
+> o LOGO de D-4 (app/src/main/cpp/ui/Brand.h/.cpp).
 >
 > Convenção de paths: TODOS os caminhos deste ficheiro são relativos à
 > RAIZ do repo (exemplo: o registo da linguagem vive em
