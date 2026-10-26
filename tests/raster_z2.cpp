@@ -1684,6 +1684,337 @@ int goldenRun(bool writeMode) {
     return failures;
 }
 
+// ===========================================================================
+// FASE W-1 (0.12-W-1) — A ARQUITETURA DO CÉU E DO CLIMA EM PÍXEIS:
+//   1. O CÉU DEFAULT SEM WorldEnvironment (a decisão 1 do dono: o quad
+//      procedural desenha com tod 12 / cobertura 0.3 — o velho fundo era o
+//      clear escuro de fábrica);
+//   2. AS ESTRELAS à noite (22:00) + a DENSIDADE do utilizador (1.0 acende
+//      o campo, 0 apaga);
+//   3. A LUA em píxeis: o disco ACENDE, a FASE 0 (nova) apaga-o, o
+//      brilho 0 desliga-o — a pose CENTRA a lua pela INVERSA sky::dirToNdc;
+//   4. A GRELHA SOBREVIVE AO CÉU (a refutação da ordem «grelha antes do
+//      céu»: com a grelha MASCARADA o frame muda; se o passe do céu a
+//      apagasse, o diff seria ZERO);
+//   5. O CLIMA PELO NOME (o fluxo dos DOIS TICs do dono): o "RainEmitter"
+//      (ParticleEmitter+Transform) + o "WeatherController"
+//      (AmbientEnvironment) — a chuva desenha SEM ninguém tocar no emissor.
+// ===========================================================================
+int w1Run() {
+    fase("FASE W-1 — a arquitetura em píxeis (o céu default, as estrelas, "
+         "a lua, a grelha, o alvo do clima)");
+    // o assentamento da casa (o padrão do golden: 30 frames + relógios
+    // FIXOS + 2 passos a dt 0 — o frame LIDO é o mesmo em TODAS as corridas)
+    auto aferrar = []() {
+        for (int i = 0; i < 30; ++i) stepFrame(1.0f / 60.0f);
+        g_fxTime = 50.0f;
+        g_skyTime = 100.0f;
+        stepFrame(0.0f);
+        stepFrame(0.0f);
+    };
+    auto poseSempre = []() {
+        g_camera.target = Vec3{0.0f, 0.0f, 0.0f};
+        g_camera.yaw = 0.60f;
+        g_camera.pitch = 0.50f;
+        g_camera.dist = 6.0f;
+    };
+    // varre a cena de Environment/Ambient/ParticleEmitter/Wind (o boot pode
+    // ter deixado herança — a FASE W-1 controla a cena COMPLETA)
+    auto varrerCena = []() {
+        std::vector<Handle> alvo;
+        g_scene.forEachActive([&](Tic& t) {
+            if (t.getComponent<Environment>() ||
+                t.getComponent<AmbientEnvironment>() ||
+                t.getComponent<ParticleEmitter>() ||
+                t.getComponent<WindTIC>()) {
+                alvo.push_back(t.handle);
+            }
+        });
+        for (const Handle h : alvo) {
+            g_scene.destroy(h);
+        }
+    };
+    // a luminância de um pixel (o buffer do glReadPixels: linha 0 = FUNDO)
+    auto lumPx = [](const std::vector<u8>& px, int w, int h, f32 ndcX,
+                    f32 ndcY, int* rOut = nullptr, int* bOut = nullptr) {
+        const int x = static_cast<int>((ndcX * 0.5f + 0.5f) * (w - 1));
+        const int y = static_cast<int>((ndcY * 0.5f + 0.5f) * (h - 1));
+        const size_t o = (static_cast<size_t>(y) * w + x) * 4;
+        if (o + 2 >= px.size()) {
+            return -1.0f;
+        }
+        if (rOut) *rOut = px[o];
+        if (bOut) *bOut = px[o + 2];
+        return (0.2126f * px[o] + 0.7152f * px[o + 1] +
+                0.0722f * px[o + 2]) / 255.0f;
+    };
+
+    // ---- (1) O CÉU DEFAULT SEM WorldEnvironment ------------------------
+    varrerCena();
+    poseSempre();
+    g_camera.pitch = -0.35f;   // a olhar PARA CIMA: o céu enche o frame
+    aferrar();
+    {
+        int w = 0, h = 0;
+        const std::vector<u8> px = readFrame(&w, &h);
+        int r = 0, b = 0;
+        const f32 lumTop = lumPx(px, w, h, 0.0f, 0.75f, &r, &b);
+        std::printf("    sem WE: pixel do topo r=%d b=%d lum=%.3f\n", r, b,
+                    lumTop);
+        check(lumTop > 0.2f && b > r + 20,
+              "sem WorldEnvironment o céu procedural AZUL desenha (o "
+              "default W-1: tod 12 · cobertura 0.3 — o velho era o clear "
+              "escuro de fábrica)");
+        const f32 lumGround = lumPx(px, w, h, 0.0f, -0.75f);
+        check(lumGround > 0.05f && lumGround < 0.5f,
+              "sem WE o abaixo-do-horizonte é o TOM DE CHÃO (o gradiente da "
+              "Z2-F2 — nem céu azul nem o escuro de fábrica)");
+        prova("o céu DEFAULT sem WorldEnvironment (a decisão 1 do dono)");
+    }
+
+    // ---- (2) AS ESTRELAS à noite + a densidade do utilizador ------------
+    Handle envH = g_scene.create("WorldEnvironment");
+    Environment* env = nullptr;
+    {
+        Tic* t = g_scene.get(envH);
+        t->addComponent<Transform3D>();
+        env = t->addComponent<Environment>();
+        env->skyType = Environment::kSkyTypeProcedural;
+        env->timeOfDay = 22.0f;        // a noite do dono
+        env->starDensity = 1.0f;       // o campo CHEIO (o limiar 112)
+        env->starBrightness = 0.95f;
+        env->moonBrightness = 0.0f;    // a lua FORA da prova das estrelas
+        env->cloudCoverage = 0.0f;     // céu LIMPO: as nuvens não comem a
+                                       // contagem (a cobertura 0 mata o
+                                       // limiar — n ≤ 1 < t=1)
+        env->clampFields();
+    }
+    // A UI FORA DA MEDIDA (o isolamento da F0): os botões do chrome do
+    // viewport são BRANCOS — sem as máscaras a sonda conta ÍCONES, não
+    // estrelas; com ui/gizmos OFF o frame é o 3D PURO
+    gldbg::g_masks.master = true;
+    gldbg::g_masks.ui = false;
+    gldbg::g_masks.uiGlass = false;
+    gldbg::g_masks.gizmos = false;
+    aferrar();
+    long estrelasCheias = 0;
+    {
+        int w = 0, h = 0;
+        const std::vector<u8> px = readFrame(&w, &h);
+        // a FAIXA CENTRAL do viewport (x 270..1010 — sem a hierarquia/à
+        // esquerda nem o Inspector/à direita, o padrão das sondas da casa)
+        // na METADE DE CIMA (o buffer é bottom-up: as linhas h/2..h−120)
+        estrelasCheias = textPixels(px, w, 270, h / 2, 1010, h - 120, 0.55f);
+        const f32 lumTop = lumPx(px, w, h, 0.0f, 0.75f);
+        capturePng("w1_estrelas_dense");
+        std::printf("    22:00 density 1.0: %ld px de estrelas (metade de "
+                    "cima), fundo lum=%.3f\n", estrelasCheias, lumTop);
+        check(estrelasCheias > 300,
+              "as ESTRELAS aparecem às 22:00 com density 1.0 (o campo em "
+              "píxeis)");
+        check(lumTop < 0.15f,
+              "às 22:00 o céu é ESCURO (o override do WE — a paleta da "
+              "noite da Y-E)");
+    }
+    env->starDensity = 0.0f;    // o campo MORTO
+    env->clampFields();
+    aferrar();
+    {
+        int w = 0, h = 0;
+        const std::vector<u8> px = readFrame(&w, &h);
+        const long estrelasZero = textPixels(px, w, 270, h / 2, 1010,
+                                            h - 120, 0.55f);
+        std::printf("    22:00 density 0.0: %ld px de estrelas\n",
+                    estrelasZero);
+        check(estrelasZero < estrelasCheias / 10,
+              "density 0 APAGA o campo (o starDensity do utilizador manda)");
+        prova("as estrelas às 22:00 + a densidade do utilizador em píxeis");
+    }
+
+    // ---- (3) A LUA: o disco, as fases, o brilho --------------------------
+    env->starDensity = Environment::kStarDensityDefault;
+    env->starBrightness = Environment::kStarBrightDefault;
+    env->moonPhase = 0.5f;          // a CHEIA
+    env->moonBrightness = 0.9f;
+    env->cloudCoverage = 0.0f;      // o céu continua LIMPO: a nuvem não
+                                    // pode tapar o disco da prova
+    env->clampFields();
+    // a pose que CENTRA a lua: varre yaw/pitch e mede o NDC da lua pela
+    // INVERSA sky::dirToNdc (determinístico — sem constantes mágicas). O
+    // guard da INVERSA devolve (0,0) para a lua ATRÁS da câmara — a busca
+    // EXIGE dot(lua, fwd) > 0.35 (a lua À FRENTE, bem dentro do cone)
+    f32 moonDir[3];
+    sky::moonDirFromTime(22.0f, moonDir);
+    f32 bestYaw = 0.6f, bestPitch = -0.6f, bestN2 = 9.0f;
+    for (int yi = 0; yi < 63; ++yi) {
+        for (int pi = 0; pi < 25; ++pi) {
+            g_camera.yaw = static_cast<f32>(yi) * 0.1f;
+            g_camera.pitch = -0.1f - static_cast<f32>(pi) * 0.05f;
+            const Mat4 view = g_camera.view();
+            Vec3 right, up, fwd;
+            if (!sky::viewBasis(view, right, up, fwd)) {
+                continue;
+            }
+            const f32 facing = moonDir[0] * fwd.x + moonDir[1] * fwd.y +
+                               moonDir[2] * fwd.z;
+            if (facing < 0.35f) {
+                continue;   // a lua atrás/de lado — o guard mentiria (0,0)
+            }
+            f32 ndc[2];
+            sky::dirToNdc(Vec3{moonDir[0], moonDir[1], moonDir[2]}, right,
+                          up, fwd, 1280.0f / 720.0f,
+                          std::tan(g_camera.fovY * 0.5f), ndc);
+            const f32 n2 = ndc[0] * ndc[0] + ndc[1] * ndc[1];
+            if (n2 < bestN2) {
+                bestN2 = n2;
+                bestYaw = g_camera.yaw;
+                bestPitch = g_camera.pitch;
+            }
+        }
+    }
+    g_camera.yaw = bestYaw;
+    g_camera.pitch = bestPitch;
+    // O ALVO SOBE ao longo da direção da lua: com o pitch negativo a olhar
+    // para cima, o OLHO da orbit caía 5 unidades DEBAIXO do chão e o CUBO
+    // da cena silhuetava EXATAMENTE à frente da lua (o "polígono" da
+    // sonda). O target a 40 unidades na direção da lua põe o OLHO no céu —
+    // a cena fica PARA TRÁS e o disco limpo (a direção da vista não muda:
+    // é do yaw/pitch)
+    g_camera.target = Vec3{moonDir[0] * 40.0f, moonDir[1] * 40.0f,
+                           moonDir[2] * 40.0f};
+    aferrar();
+    // A SONDA: o pixel MAIS BRILHANTE da faixa central do viewport — o
+    // DISCO da lua cheia (com o glow por baixo) é o ponto mais claro do
+    // céu noturno; a busca NDC garante o ENQUADRAMENTO, o píxel mais claro
+    // AFERRE o disco (o layout do viewport é do editor — o NDC→píxel exato
+    // não é contrato da sonda)
+    int luaX = -1, luaY = -1;
+    f32 lumCheia = -1.0f;
+    {
+        int w = 0, h = 0;
+        const std::vector<u8> px = readFrame(&w, &h);
+        for (int y = 60; y < 650; ++y) {
+            for (int x = 270; x < 1010; ++x) {
+                const size_t o = (static_cast<size_t>(y) * w + x) * 4;
+                const f32 lum = (0.2126f * px[o] + 0.7152f * px[o + 1] +
+                                 0.0722f * px[o + 2]) / 255.0f;
+                if (lum > lumCheia) {
+                    lumCheia = lum;
+                    luaX = x;
+                    luaY = y;
+                }
+            }
+        }
+        std::printf("    lua: pose yaw=%.2f pitch=%.2f ndc=(%.2f,%.2f) "
+                    "píxel=(%d,%d) lum=%.3f\n", bestYaw, bestPitch,
+                    0.0f, 0.0f, luaX, luaY, lumCheia);
+        capturePng("w1_lua_cheia");
+        check(bestN2 < 0.25f,
+              "a lua às 22:00 está no ENQUADRAMENTO (a pose centralizada "
+              "pela INVERSA — a sonda depende dela)");
+        check(lumCheia > 0.5f,
+              "a LUA CHEIA acende (o píxel mais claro do viewport é o "
+              "disco: phase 0.5 · brightness 0.9)");
+    }
+    // A FASE: a lua NOVA apaga o MESMO pixel
+    env->moonPhase = 0.0f;
+    env->clampFields();
+    aferrar();
+    {
+        int w = 0, h = 0;
+        const std::vector<u8> px = readFrame(&w, &h);
+        const size_t o = (static_cast<size_t>(luaY) * w + luaX) * 4;
+        const f32 lumNova = (0.2126f * px[o] + 0.7152f * px[o + 1] +
+                             0.0722f * px[o + 2]) / 255.0f;
+        std::printf("    lua NOVA (phase 0): lum=%.3f (era %.3f)\n", lumNova,
+                    lumCheia);
+        check(lumNova < lumCheia - 0.15f,
+              "a FASE controla o disco: a lua NOVA (phase 0) apaga o centro");
+    }
+    // O BRILHO: 0 desliga a lua inteira (disco + glow)
+    env->moonPhase = 0.5f;
+    env->moonBrightness = 0.0f;
+    env->clampFields();
+    aferrar();
+    {
+        int w = 0, h = 0;
+        const std::vector<u8> px = readFrame(&w, &h);
+        const size_t o = (static_cast<size_t>(luaY) * w + luaX) * 4;
+        const f32 lumOff = (0.2126f * px[o] + 0.7152f * px[o + 1] +
+                            0.0722f * px[o + 2]) / 255.0f;
+        std::printf("    lua brightness 0: lum=%.3f (era %.3f)\n", lumOff,
+                    lumCheia);
+        check(lumOff < lumCheia - 0.1f,
+              "moonBrightness 0 DESLIGA a lua (o disco e o glow morrem)");
+        prova("a lua em píxeis: o disco acende, a fase apaga, o brilho "
+              "desliga");
+    }
+    env->moonBrightness = Environment::kMoonBrightDefault;
+    env->cloudCoverage = Environment::kCoverageDefault;
+    env->timeOfDay = Environment::kTodDefault;
+    env->clampFields();
+    // a UI VOLTA (as máscaras ao estado de fábrica)
+    gldbg::g_masks.master = false;
+    gldbg::g_masks.ui = true;
+    gldbg::g_masks.uiGlass = true;
+    gldbg::g_masks.gizmos = true;
+
+    // ---- (4) A GRELHA SOBREVIVE AO CÉU (a refutação da ordem) -----------
+    poseSempre();
+    aferrar();
+    {
+        int w = 0, h = 0;
+        const std::vector<u8> comGrelha = readFrame(&w, &h);
+        gldbg::g_masks.master = true;
+        gldbg::g_masks.grid = false;   // TUDO on MENOS a grelha
+        aferrar();
+        const std::vector<u8> semGrelha = readFrame(&w, &h);
+        gldbg::g_masks.master = false;
+        gldbg::g_masks.grid = true;
+        const long d = diffPixels(comGrelha, semGrelha);
+        std::printf("    grelha on/off: diff=%ld px\n", d);
+        check(d > 2000,
+              "a grelha desenha POR CIMA do céu (a ordem céu→grelha→TICs — "
+              "se a grelha fosse ANTES do céu, o passe fullscreen "
+              "apagava-a e este diff seria ~0)");
+        prova("a grelha sobrevive ao passe do céu (a «grelha antes do céu» "
+              "refutada por construção)");
+    }
+
+    // ---- (5) O CLIMA PELO NOME (o fluxo dos DOIS TICs do dono) ----------
+    poseSempre();
+    aferrar();
+    {
+        int w = 0, h = 0;
+        const std::vector<u8> antes = readFrame(&w, &h);
+        // o "RainEmitter" (ParticleEmitter + Transform) PRIMEIRO, o
+        // "WeatherController" (AmbientEnvironment) DEPOIS — a criação do
+        // controlador LIGA os dois pelo NOME (ninguém toca no emissor)
+        const Handle hpe = createTicFromPreset(
+            g_scene, PresetKind::ParticleEmitter, nullptr, nullptr);
+        g_scene.get(hpe)->name = "RainEmitter";
+        const Handle hae = createTicFromPreset(
+            g_scene, PresetKind::WeatherController, nullptr, nullptr);
+        (void)hae;
+        aferrar();
+        const std::vector<u8> depois = readFrame(&w, &h);
+        const long gotas = particlePixels(depois, antes, w, h, 270, 180,
+                                          1010, 640);
+        std::printf("    DOIS TICs (RainEmitter+WeatherController): %ld px "
+                    "de chuva na faixa central\n", gotas);
+        check(gotas > 150,
+              "a chuva do 'RainEmitter' controlado pelo 'WeatherController' "
+              "desenha (o fluxo dos DOIS TICs — o alvo por NOME no render "
+              "real)");
+        // a mortes: a cena volta ao estado do boot
+        g_scene.destroy(hpe);
+        g_scene.destroy(hae);
+        prova("o clima por NOME em píxeis (dois TICs, um controlador)");
+    }
+    varrerCena();
+    return g_failed;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1801,6 +2132,15 @@ int main(int argc, char** argv) {
         const int f = climaRun();
         onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
         std::printf("\n%s (falhas=%d)\n", f ? "CLIMA FALHOU" : "CLIMA OK", f);
+        return f ? 1 : 0;
+    }
+    const bool w1Mode = argc > 1 && std::strcmp(argv[1], "--w1") == 0;
+    if (w1Mode) {
+        // 0.12-W-1: a arquitetura em píxeis (o céu default, as estrelas,
+        // a lua, a grelha, o alvo do clima) — o MESMO boot
+        const int f = w1Run();
+        onAppCmd(&g_app, APP_CMD_TERM_WINDOW);
+        std::printf("\n%s (falhas=%d)\n", f ? "W1 FALHOU" : "W1 OK", f);
         return f ? 1 : 0;
     }
     if (goldenMode || goldenWriteMode) {

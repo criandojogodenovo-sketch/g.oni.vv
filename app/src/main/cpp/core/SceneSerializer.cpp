@@ -1306,6 +1306,21 @@ void appendComponentJson(Json& arr, const Environment* env) {
     if (env->cloudHeight != Environment::kHeightDefault) {
         c.addMember("cloudH", Json::makeNumber(env->cloudHeight));
     }
+    // ---- 0.12-W-1: AS ESTRELAS E A LUA (defaults omitidos = os do dono —
+    // o .goni da Y-E carrega byte a byte; o starDensity 0.5 reproduz o
+    // campo de sempre, o starBrightness 0.8 é o valor novo do dono) ------
+    if (env->starDensity != Environment::kStarDensityDefault) {
+        c.addMember("starD", Json::makeNumber(env->starDensity));
+    }
+    if (env->starBrightness != Environment::kStarBrightDefault) {
+        c.addMember("starB", Json::makeNumber(env->starBrightness));
+    }
+    if (env->moonPhase != Environment::kMoonPhaseDefault) {
+        c.addMember("moonP", Json::makeNumber(env->moonPhase));
+    }
+    if (env->moonBrightness != Environment::kMoonBrightDefault) {
+        c.addMember("moonB", Json::makeNumber(env->moonBrightness));
+    }
     arr.addItem(std::move(c));
 }
 
@@ -1391,6 +1406,23 @@ void fillEnvironment(Environment* env, const Json& comp) {
     if (const Json* j = comp.find("cloudH");
         j && j->type == Json::Type::Number) {
         env->cloudHeight = static_cast<f32>(j->number);
+    }
+    // ---- 0.12-W-1: AS ESTRELAS E A LUA (os campos ausentes = os defaults)
+    if (const Json* j = comp.find("starD");
+        j && j->type == Json::Type::Number) {
+        env->starDensity = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("starB");
+        j && j->type == Json::Type::Number) {
+        env->starBrightness = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("moonP");
+        j && j->type == Json::Type::Number) {
+        env->moonPhase = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("moonB");
+        j && j->type == Json::Type::Number) {
+        env->moonBrightness = static_cast<f32>(j->number);
     }
     env->clampFields();
 }
@@ -1566,9 +1598,9 @@ void fillWindTIC(WindTIC* w, const Json& comp) {
     w->clampFields();   // a direção NORMALIZA ao carregar (o contrato)
 }
 
-// ---- 0.12-Y-F2 — AmbientEnvironment: SÓ weatherType + intensity viajam
-// (o thunderFlash/thunderTimer são RUNTIME — a cena carrega SEM raio
-// pendente; os defaults ficam FORA do dump)
+// ---- 0.12-Y-F2 — AmbientEnvironment: SÓ weatherType + intensity + o
+// ALVO da W-1 viajam (o thunderFlash/thunderTimer são RUNTIME — a cena
+// carrega SEM raio pendente; os defaults ficam FORA do dump)
 void appendComponentJson(Json& arr, const AmbientEnvironment* ae) {
     if (!ae) {
         return;
@@ -1581,6 +1613,11 @@ void appendComponentJson(Json& arr, const AmbientEnvironment* ae) {
     if (ae->intensity != AmbientEnvironment::kIntensityDefault) {
         c.addMember("intensity", Json::makeNumber(ae->intensity));
     }
+    // 0.12-W-1 — o ALVO POR NOME (default "RainEmitter" omitido = o .goni
+    // da Y-F2 carrega byte a byte)
+    if (ae->targetEmitter != AmbientEnvironment::kTargetDefault) {
+        c.addMember("target", Json::makeString(ae->targetEmitter));
+    }
     arr.addItem(std::move(c));
 }
 
@@ -1592,6 +1629,11 @@ void fillAmbientEnvironment(AmbientEnvironment* ae, const Json& comp) {
     if (const Json* j = comp.find("intensity");
         j && j->type == Json::Type::Number) {
         ae->intensity = static_cast<f32>(j->number);
+    }
+    // 0.12-W-1 — o ALVO (ausente = o default "RainEmitter")
+    if (const Json* j = comp.find("target");
+        j && j->type == Json::Type::String) {
+        ae->targetEmitter = j->string;
     }
     ae->clampFields();   // o tipo desconhecido cai no NONE (o seguro)
 }

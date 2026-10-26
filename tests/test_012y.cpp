@@ -1484,7 +1484,7 @@ TEST(env_sky_clouds) {
         EXPECT_MSG(countSub(code, "(kCloudScale * uHeight)") >= 1,
                    "env_sky_clouds: a ALTURA saiu do UV das nuvens no FS "
                    "(a expressão do contrato)");
-        EXPECT_MSG(countSub(code, "float starField(vec3 dir)") >= 1,
+        EXPECT_MSG(countSub(code, "float starField(vec3 dir, float thresh)") >= 1,
                    "env_sky_clouds: o FS perdeu o campo de estrelas");
         EXPECT_MSG(countSub(code, "if (uStars > 0.001)") >= 1,
                    "env_sky_clouds: o branch UNIFORME das estrelas morreu "

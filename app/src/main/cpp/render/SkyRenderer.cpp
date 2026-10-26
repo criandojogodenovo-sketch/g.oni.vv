@@ -25,6 +25,18 @@ void main() {
 // Pbr.h — a mutação que diverge o FS das puras morre nos pins).
 constexpr char kFsSrc[] = R"(#version 300 es
 precision highp float;
+// 0.12-W-1 (O ACHADO GPU): int/uint em GLSL ES 3.0 nascem MEDIUMP no
+// fragment shader (≥16 bits no mínimo do spec) — o HASH INTEIRO dos
+// elementos celestes (hash21/hash3u das nuvens/estrelas) colapsava no
+// rasterizador real: os produtos uint de 32 bits enrolavam na precisão
+// curta, o hash devolvia sempre o MESMO valor → fbm2 constante →
+// cloudAlpha 0 (céu SEM nuvens) e starField 0 (SEM estrelas) — os
+// elementos celestes NUNCA desenharam no GPU real (PROVADO por píxel no
+// raster W-1; os goldens da Z2 tinham baselined o céu MORTO — capturas
+// determinísticas mas vazias). O `highp int` devolve os 32 bits ao hash
+// (o uint segue o int na precisão da casa ES 3.0) — as nuvens, as
+// estrelas e a lua vivem (a prova: raster_z2 --w1).
+precision highp int;
 in vec2 vNdc;
 uniform vec3 uRight;
 uniform vec3 uUp;
@@ -37,10 +49,15 @@ uniform float uCoverage;
 uniform float uHeight;    // 0.12-Y-E: a escala vertical das nuvens
 uniform float uStars;     // 0.12-Y-E: o gate das estrelas (o branch uniforme)
 uniform float uThunderFlash; // 0.12-Y-F2: o FLASH da trovoada (0..1)
+uniform float uStarThresh;   // 0.12-W-1: o limiar do campo (o starDensity)
+uniform float uStarBright;   // 0.12-W-1: o ganho dos pontos
+uniform float uMoonPhase;    // 0.12-W-1: a fase da lua (0=nova, 0.5=cheia)
+uniform float uMoonBright;   // 0.12-W-1: o brilho da lua (0 = sem lua)
 uniform vec3 uHorizon;
 uniform vec3 uZenith;
 uniform vec3 uSunCol;
 uniform vec3 uSunDir;
+uniform vec3 uMoonDir;    // 0.12-W-1: a posição da lua (oposta ao sol)
 out vec4 outColor;
 
 // kCloudScale / kCloudSoft / kPlaneEps / kWindDir* — as MESMAS constantes
@@ -63,8 +80,14 @@ const float kCloudSunMix  = 0.35;
 // 0.12-Y-E — as constantes das estrelas (as MESMAS das puras)
 const float kStarDensity  = 60.0;
 const float kStarRadius   = 0.22;
-const float kStarThresh   = 184.0;
 const float kStarHorizonY = 0.08;
+// 0.12-W-1 — AS CONSTANTES DA LUA (as MESMAS das puras SkyRenderer.h)
+const float kMoonCosDisk  = 0.99945;
+const float kMoonCosSoft  = 0.0004;
+const float kMoonGlowPow  = 16.0;
+const float kMoonGlowGain = 0.18;
+const float kMoonTermSoft = 0.08;
+const vec3  kMoonCol      = vec3(0.98, 0.95, 0.86);
 
 float sstep(float e0, float e1, float x) {
     float d = e1 - e0;
@@ -118,9 +141,10 @@ float horizonFade(float dirY) {
     return sstep(kPlaneEps, kHorizonFadeY, dirY);
 }
 
-// a réplica de sky::hash3u / sky::starField (0.12-Y-E — as ESTRELAS: o
-// hash inteiro sem sin, o threshold de presença, o offset 0.2..0.8)
-float starField(vec3 dir) {
+// a réplica de sky::hash3u / sky::starFieldThresh (0.12-Y-E + W-1 — as
+// ESTRELAS: o hash inteiro sem sin, o LIMAR do starDensity do utilizador,
+// o offset 0.2..0.8)
+float starField(vec3 dir, float thresh) {
     vec3 s = dir * kStarDensity;
     vec3 g = floor(s);
     ivec3 c = ivec3(g);
@@ -128,7 +152,7 @@ float starField(vec3 dir) {
            + uint(c.z) * 2246822519u;
     h = (h ^ (h >> 13u)) * 1274126177u;
     h ^= h >> 16u;
-    if (float(h & 0xFFu) < kStarThresh) {
+    if (float(h & 0xFFu) < thresh) {
         return 0.0;
     }
     vec3 o = vec3(0.2) + 0.6 * vec3(float((h >> 8u) & 0xFFu),
@@ -136,6 +160,25 @@ float starField(vec3 dir) {
                                     float((h >> 24u) & 0xFFu)) / 255.0;
     float d = length(s - g - o);
     return 1.0 - sstep(0.0, kStarRadius, d);
+}
+
+// 0.12-W-1 — a réplica de sky::moonDisk / sky::moonGlow (o disco com a
+// penumbra da casa; o halo largo de ganho SUBTIL)
+float moonDisk(float cosA) {
+    return sstep(kMoonCosDisk, kMoonCosDisk + kMoonCosSoft, cosA);
+}
+float moonGlow(float cosA) {
+    return pow(max(cosA, 0.0), kMoonGlowPow) * kMoonGlowGain;
+}
+
+// 0.12-W-1 — a réplica de sky::moonPhaseLit (A FASE: o terminador linear —
+// a fração iluminada é exata nas 4 fases-chave; o lado troca no 0.5)
+float moonPhaseLit(float u, float phase) {
+    float p = clamp(phase, 0.0, 1.0);
+    float frac = 0.5 * (1.0 - cos(p * 6.28318530718));
+    float b = 2.0 * frac - 1.0;
+    float uEff = p < 0.5 ? u : -u;
+    return 1.0 - sstep(b - kMoonTermSoft, b + kMoonTermSoft, uEff);
 }
 
 void main() {
@@ -155,11 +198,21 @@ void main() {
     // o HALO antes das nuvens (atravessa o véu fino)
     float d = dot(dir, uSunDir);
     col += uSunCol * sunGlow(d);
-    // as ESTRELAS (0.12-Y-E): o branch UNIFORME — o dia salta o campo
-    // inteiro; à noite os pontos morrem atrás das nuvens (o mix de baixo)
+    // 0.12-W-1 — A LUA: a direção oposta ao sol (o dm do disco + do halo)
+    float dm = dot(dir, uMoonDir);
+    // as ESTRELAS (0.12-Y-E + W-1: o branch UNIFORME — o dia salta o campo
+    // inteiro; à noite os pontos moram atrás das nuvens (o mix de baixo);
+    // o LIMAR vem do starDensity e o GANHO do starBrightness do WE)
     if (uStars > 0.001) {
-        float s = starField(dir) * uStars * sstep(0.0, kStarHorizonY, dir.y);
-        col += vec3(s);
+        float s = starField(dir, uStarThresh) * uStars
+                * sstep(0.0, kStarHorizonY, dir.y);
+        col += vec3(s * uStarBright);
+    }
+    // o GLOW da lua antes das nuvens (SUBTIL — atravessa o véu; morre no
+    // horizonte como as estrelas: a lua BAIXA não assoma por baixo do chão)
+    if (uMoonBright > 0.001) {
+        float mh = sstep(0.0, kStarHorizonY, dir.y);
+        col += kMoonCol * moonGlow(dm) * uMoonBright * mh;
     }
     // as NUVENS: a projeção planar + A ALTURA + O VENTO (a réplica de
     // sky::cloudUv — o tempo × a velocidade no UV; o contrato vive SÓ na
@@ -174,6 +227,17 @@ void main() {
     col = mix(col, cloudCol, a);
     // o DISCO depois das nuvens (morre atrás da nuvem densa)
     col += uSunCol * sunDisk(d) * (1.0 - a);
+    // 0.12-W-1 — O DISCO DA LUA depois das nuvens (o MESMO contrato do
+    // sol: morre atrás da nuvem densa) + A FASE (o terminador no eixo
+    // horizontal do disco — a réplica de sky::moonDiscU/moonPhaseLit)
+    if (uMoonBright > 0.001 && dm > kMoonCosDisk) {
+        float mh = sstep(0.0, kStarHorizonY, dir.y);
+        vec3 t = normalize(vec3(uMoonDir.z, 0.0, -uMoonDir.x));
+        float sinDisk = sqrt(1.0 - kMoonCosDisk * kMoonCosDisk);
+        float u = dot(dir, t) / sinDisk;
+        col += kMoonCol * moonDisk(dm) * moonPhaseLit(u, uMoonPhase)
+             * uMoonBright * (1.0 - a) * mh;
+    }
     // o FLASH da trovoada (0.12-Y-F2 — a linha EXATA do prompt; sem
     // geometria de raio: o ecrã inteiro aclara azul-frio e morre em ~0.33 s)
     col += vec3(uThunderFlash * 0.6, uThunderFlash * 0.65, uThunderFlash * 0.75);
@@ -237,6 +301,11 @@ bool SkyRenderer::init() {
     locHeight_ = glGetUniformLocation(prog_, "uHeight");   // 0.12-Y-E
     locStars_ = glGetUniformLocation(prog_, "uStars");     // 0.12-Y-E
     locThunder_ = glGetUniformLocation(prog_, "uThunderFlash");   // 0.12-Y-F2
+    locStarThresh_ = glGetUniformLocation(prog_, "uStarThresh");  // 0.12-W-1
+    locStarBright_ = glGetUniformLocation(prog_, "uStarBright");  // 0.12-W-1
+    locMoonPhase_ = glGetUniformLocation(prog_, "uMoonPhase");    // 0.12-W-1
+    locMoonBright_ = glGetUniformLocation(prog_, "uMoonBright");  // 0.12-W-1
+    locMoonDir_ = glGetUniformLocation(prog_, "uMoonDir");        // 0.12-W-1
     locHor_ = glGetUniformLocation(prog_, "uHorizon");
     locZen_ = glGetUniformLocation(prog_, "uZenith");
     locSunCol_ = glGetUniformLocation(prog_, "uSunCol");
@@ -277,6 +346,8 @@ void SkyRenderer::destroy() {
     locTime_ = locSpeed_ = locCoverage_ = -1;
     locHeight_ = locStars_ = -1;
     locThunder_ = -1;   // 0.12-Y-F2
+    locStarThresh_ = locStarBright_ = -1;   // 0.12-W-1
+    locMoonPhase_ = locMoonBright_ = locMoonDir_ = -1;   // 0.12-W-1
     locHor_ = locZen_ = locSunCol_ = locSunDir_ = -1;
     vertexCount_ = 0;
 }
@@ -319,6 +390,23 @@ DrawStats SkyRenderer::draw(const Params& p) const {
     // draw continua a ser o relógio das nuvens (o contrato do pin da D)
     if (locThunder_ >= 0) {
         glUniform1f(locThunder_, p.thunder);
+    }
+    // 0.12-W-1 — as estrelas e a lua ANTES do uTime (o MESMO contrato: o
+    // ÚLTIMO 1f do draw é o relógio das nuvens, a alma da M-Yd1)
+    if (locStarThresh_ >= 0) {
+        glUniform1f(locStarThresh_, p.starThresh);
+    }
+    if (locStarBright_ >= 0) {
+        glUniform1f(locStarBright_, p.starBright);
+    }
+    if (locMoonPhase_ >= 0) {
+        glUniform1f(locMoonPhase_, p.moonPhase);
+    }
+    if (locMoonBright_ >= 0) {
+        glUniform1f(locMoonBright_, p.moonBright);
+    }
+    if (locMoonDir_ >= 0) {
+        glUniform3f(locMoonDir_, p.moonDir[0], p.moonDir[1], p.moonDir[2]);
     }
     if (locHor_ >= 0) {
         glUniform3f(locHor_, p.horizon[0], p.horizon[1], p.horizon[2]);

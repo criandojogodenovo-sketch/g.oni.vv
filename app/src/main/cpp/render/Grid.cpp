@@ -203,24 +203,26 @@ DrawStats Grid::draw(const Mat4& vp, const Vec3& camPos, f32 focusDist) const {
     if (locFade_ >= 0) {
         glUniform2f(locFade_, start, end);
     }
-    // transparente: blend com fade, depth test ligado (respeita os TICs),
-    // depth write desligado (nunca oculta nada); sem cull — o quad é visto
-    // de cima e de baixo (pitch ±89°).
-    // 0.12-Z F2 (o dono: «a grelha NUNCA pode ser coberta por nada do
-    // mundo»): o depth test era INHERITADO — um passe que o deixasse OFF
-    // (ou com outra func) mudava a grelha sem ninguém saber. EXPLÍCITO:
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LESS);   // o MESMO func da geometria (o default da casa)
+    // 0.12-W-1 (O BUG DA GRELHA — a janela EXATA do dono): a grelha desenha
+    // SEM depth test, SEM cull e COM blend src-alpha. O passe é
+    // PRÉ-GEOMETRIA (o main desenha-o logo a seguir ao céu, ANTES das
+    // malhas — a oclusão dos TICs vem da ORDEM DE PINTURA: o mesh pinta
+    // POR CIMA da grelha; o depth buffer ainda está limpo, testá-lo não
+    // diz nada) e a janela FECHA com o estado de fábrica da geometria:
+    // depth ON, cull ON, blend OFF — nenhum passe herda o estado da
+    // grelha (o M-W3 vigia: sem a reposição o pin fica VERMELHO).
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE);
-    glDisable(GL_CULL_FACE);
     glBindVertexArray(vao_);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glBindVertexArray(0);
+    glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
-    glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
     return {vertexCount_, 1};
 }
 

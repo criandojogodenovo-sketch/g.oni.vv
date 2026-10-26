@@ -201,6 +201,11 @@ constexpr u64 kInspectorEnvTod  = 5431;   // slider hora 0..24
 constexpr u64 kInspectorEnvCyc  = 5432;   // botão auto ciclo (ligado|desligado)
 constexpr u64 kInspectorEnvCycS = 5433;   // slider vel. ciclo 0..1
 constexpr u64 kInspectorEnvHgt  = 5434;   // slider altura nuvens 0.25..4
+// 0.12-W-1 — AS ESTRELAS E A LUA (as 4 linhas novas da secção procedural)
+constexpr u64 kInspectorEnvStarD = 5435;  // slider densidade estrelas 0..1
+constexpr u64 kInspectorEnvStarB = 5436;  // slider brilho estrelas 0..1
+constexpr u64 kInspectorEnvMoonP = 5437;  // slider fase da lua 0..1
+constexpr u64 kInspectorEnvMoonB = 5438;  // slider brilho da lua 0..1
 // 0.12-Y-F1 — PARTÍCULAS (faixa 5440..5447)
 constexpr u64 kInspectorPeMax   = 5440;   // slider máx. partículas 1..2000
 constexpr u64 kInspectorPeLife  = 5441;   // slider vida 0.1..20 s
@@ -216,9 +221,10 @@ constexpr u64 kInspectorWindDirX = 5450;  // slider vento x -1..1
 constexpr u64 kInspectorWindDirY = 5451;  // slider vento y -1..1
 constexpr u64 kInspectorWindDirZ = 5452;  // slider vento z -1..1
 constexpr u64 kInspectorWindStr  = 5453;  // slider força 0..10
-// 0.12-Y-F2 — CLIMA (faixa 5456..5457)
+// 0.12-Y-F2 — CLIMA (faixa 5456..5458)
 constexpr u64 kInspectorAmbWeather = 5456; // "clima: nenhum|chuva|neve|trovoada" (o ciclar)
 constexpr u64 kInspectorAmbInt     = 5457; // slider intensidade 0..1
+constexpr u64 kInspectorAmbTarget  = 5458; // 0.12-W-1: "alvo: <nome>" (teclado 18)
 // 0.8.0 (F7) — primitiva procedural do MeshRenderer + animação
 constexpr u64 kInspectorPrimSel   = 5003;   // "prim: esfera ▸" (seletor)
 constexpr u64 kInspectorPrimR     = 5600;   // slider raio/size
@@ -449,6 +455,10 @@ struct InspRow {
         EnvCyc,      // 0.12-Y-E: botão auto ciclo (o toggle da casa)
         EnvCycS,     // 0.12-Y-E: slider vel. ciclo 0..1 (1 = 1h/s)
         EnvHgt,      // 0.12-Y-E: slider altura nuvens 0.25..4
+        EnvStarD,    // 0.12-W-1: slider densidade estrelas 0..1 (o limiar)
+        EnvStarB,    // 0.12-W-1: slider brilho estrelas 0..1 (o ganho)
+        EnvMoonP,    // 0.12-W-1: slider fase da lua 0..1 (0=nova 0.5=cheia)
+        EnvMoonB,    // 0.12-W-1: slider brilho da lua 0..1 (0 = sem lua)
         // 0.12-Y-F1 — PARTÍCULAS (a secção do ParticleEmitter)
         PeSection,   // cabeçalho "Particle Emitter" + separador
         PeMax,       // slider máx. partículas 1..2000 (o COUNT do draw)
@@ -469,6 +479,7 @@ struct InspRow {
         AmbSection,  // cabeçalho "Ambient" + separador
         AmbWeather,  // "clima: nenhum|chuva|neve|trovoada" (o ciclar da casa)
         AmbInt,      // slider intensidade 0..1 (o COUNT do preset escala)
+        AmbTarget,   // 0.12-W-1: "alvo: <nome>" (o TIC do emissor — teclado 18)
     };
     Kind kind;
     f32  y;     // topo da linha em COORDS DE CONTEÚDO (cumulativo)
@@ -641,10 +652,29 @@ inline u32 inspectorRowCount(const InspProfile& p, bool selectable,
             n += 1;   // o tipo de céu (3.Y-D — o dropdown sempre visível)
             if (p.envSkyType == Environment::kSkyTypeProcedural) {
                 // 0.12-Y-E: 5 da D + hora + auto ciclo + vel. ciclo + altura
-                n += 9;   // horizonte, zénite, sol, nuvens, vento, hora,
-                          // ciclo, vel., altura
+                // 0.12-W-1: + as 4 da noite (densidade/brilho das estrelas
+                // + fase/brilho da lua — o pin inspector_daynight aferra)
+                n += 13;  // horizonte, zénite, sol, nuvens, vento, hora,
+                          // ciclo, vel., altura, estrelas×2, lua×2
             }
             n += 5;   // céu + hdri + ambiente + névoa + cor da névoa
+        }
+    }
+    // ---- VENTO (bit10 — 0.12-Y-F2): o WindTIC (direção xyz + força). A
+    // fórmula não contava a secção (lacuna latente da Y-F2 — nenhum pin
+    // aferia o perfil com vento; a W-1 fecha a conta ao tocar na vizinha)
+    if (p.wind) {
+        n += 1;
+        if (!(collapsed & kInspBitWind)) {
+            n += 4;   // dir x / y / z + força
+        }
+    }
+    // ---- CLIMA (bit11 — 0.12-Y-F2 · 0.12-W-1): o AmbientEnvironment
+    // (clima + intensidade + O ALVO por nome da W-1)
+    if (p.amb) {
+        n += 1;
+        if (!(collapsed & kInspBitAmbient)) {
+            n += 3;   // clima + intensidade + alvo
         }
     }
     // ---- SCRIPT V.ONI (bit7 — 0.9.2): secção SEMPRE presente ----------
@@ -844,6 +874,12 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
                 push(InspRow::Kind::EnvCyc, btnH, kInspectorEnvCyc);
                 push(InspRow::Kind::EnvCycS, sldH, kInspectorEnvCycS);
                 push(InspRow::Kind::EnvHgt, sldH, kInspectorEnvHgt);
+                // 0.12-W-1: as estrelas e a lua (a ordem do dono — a
+                // secção procedural fecha com o céu da noite)
+                push(InspRow::Kind::EnvStarD, sldH, kInspectorEnvStarD);
+                push(InspRow::Kind::EnvStarB, sldH, kInspectorEnvStarB);
+                push(InspRow::Kind::EnvMoonP, sldH, kInspectorEnvMoonP);
+                push(InspRow::Kind::EnvMoonB, sldH, kInspectorEnvMoonB);
             }
             push(InspRow::Kind::EnvSky, btnH, kInspectorEnvSky);
             push(InspRow::Kind::EnvHdri, btnH, kInspectorEnvHdri);
@@ -883,16 +919,16 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
             push(InspRow::Kind::WindStr, sldH, kInspectorWindStr);
         }
     }
-    // ---- CLIMA (0.12-Y-F2) — a secção do AmbientEnvironment: o TIPO
-    // (o ciclar da casa: nenhum→chuva→neve→trovoada — a mudança chama o
-    // applyWeatherPreset no ParticleEmitter do MESMO TIC) + a
-    // intensidade (o COUNT do preset escala)
+    // ---- CLIMA (0.12-Y-F2 · 0.12-W-1) — a secção do AmbientEnvironment: o
+    // TIPO (o ciclar da casa) + a intensidade + O ALVO POR NOME (a W-1: o
+    // nome do TIC do emissor — o fluxo dos DOIS TICs; o teclado 18 edita)
     if (p.amb) {
         push(InspRow::Kind::AmbSection, secH, kInspSectionBase + 11,
              kInspBitAmbient);
         if (!(collapsed & kInspBitAmbient)) {
             push(InspRow::Kind::AmbWeather, btnH, kInspectorAmbWeather);
             push(InspRow::Kind::AmbInt, sldH, kInspectorAmbInt);
+            push(InspRow::Kind::AmbTarget, btnH, kInspectorAmbTarget);
         }
     }
     // ---- SCRIPT V.ONI (0.9.2 §10) — sempre disponível num TIC ----------

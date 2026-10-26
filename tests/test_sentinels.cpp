@@ -8356,9 +8356,9 @@ TEST(regress_pbr_worldenv) {
         EXPECT_MSG(std::string(presetName(PresetKind::WorldEnvironment)) ==
                        "WorldEnvironment",
                    "R-060: o preset WorldEnvironment saiu do menu (+)");
-        EXPECT_MSG(static_cast<u32>(PresetKind::Count) == 12,
-                   "R-060: a contagem de presets regressou (12 com o "
-                   "Wind/Rain/Snow/Storm da 0.12-Y-F2)");
+        EXPECT_MSG(static_cast<u32>(PresetKind::Count) == 13,
+                   "R-060: a contagem de presets regressou (13 com o "
+                   "WeatherController da 0.12-W-1)");
         Scene s;
         const Handle hp =
             createTicFromPreset(s, PresetKind::WorldEnvironment, nullptr,
@@ -8944,14 +8944,18 @@ TEST(regress_weather) {
             s2.get(hs)->getComponent<ParticleEmitter>();
         EXPECT_MSG(pe2 != nullptr && nearEqF(pe2->lifetime, 4.0f, 1e-5f),
                    "R-064: a neve não vive 4.0 s");
-        // o INSPECTOR cicla e aplica (o contrato no fonte)
+        // o INSPECTOR cicla e aplica (o contrato no fonte). 0.12-W-1: a
+        // chamada direta do applyWeatherPreset subiu para a FONTE ÚNICA
+        // (applyWeatherToTarget — o MESMO TIC primeiro, o alvo por NOME
+        // depois; o Presets.cpp continua a chamar o applyWeatherPreset)
         std::string ui;
         EXPECT(readFileText(REPO_ROOT "/app/src/main/cpp/ui/EditorUi.cpp",
                             ui));
         const std::string uiCode = test::stripCppComments(ui);
-        EXPECT_MSG(uiCode.find("applyWeatherPreset(") != std::string::npos,
-                   "R-064: o Inspector deixou de chamar o "
-                   "applyWeatherPreset na mudança do clima (M-Yg2)");
+        EXPECT_MSG(uiCode.find("applyWeatherToTarget(scene, *tic, *e);") !=
+                       std::string::npos,
+                   "R-064: o Inspector deixou de aplicar o clima na mudança "
+                   "(a FONTE ÚNICA applyWeatherToTarget — M-Yg2)");
         EXPECT_MSG(uiCode.find("(e->weatherType + 1u) & 3u") !=
                        std::string::npos,
                    "R-064: o ciclar do clima saiu do despacho (o padrão "
@@ -8989,8 +8993,11 @@ TEST(regress_weather) {
         std::string mainSrc;
         EXPECT(readFileText(REPO_ROOT "/app/src/main/cpp/platform/main.cpp",
                             mainSrc));
-        EXPECT_MSG(mainSrc.find("sp.thunder = thunderNow;") !=
-                       std::string::npos,
+        // 0.12-W-1: o flash viaja pelo mapeamento ÚNICO (Params::
+        // fromEnvironment — o main entrega o thunderNow ao céu POR AQUI)
+        EXPECT_MSG(mainSrc.find(
+                       "sp.fromEnvironment(env, gradeNow, thunderNow, "
+                       "g_skyTime);") != std::string::npos,
                    "R-064: o céu deixou de consumir o flash do clima");
         EXPECT_MSG(mainSrc.find("updateStorm(") != std::string::npos,
                    "R-064: o update do STORM saiu do frame (o flash não "
@@ -9231,18 +9238,35 @@ TEST(regress_glctx_fase2) {
         EXPECT_MSG(code.find("pow(length") == std::string::npos,
                    "R-067: o pow() voltou à névoa (o x*x é o contrato)");
     }
-    // (3) a grelha com o estado EXPLÍCITO (o teste unitário do estado é do
-    //     device — o fonte é o contrato)
+    // (3) a grelha com a janela GL EXATA da W-1 (o bug da grelha do dono:
+    //     ANTES depth/cull OFF + blend src-alpha; DEPOIS depth/cull ON +
+    //     blend OFF — o passe é pré-geometria, o depth func explícito da
+    //     Z2-F2 morreu COM o depth test desligado durante o draw)
     {
         std::string g;
         EXPECT(readFileText(
             REPO_ROOT "/app/src/main/cpp/render/Grid.cpp", g));
         const std::string code = test::stripCppComments(g);
+        EXPECT_MSG(code.find("glDisable(GL_DEPTH_TEST);") !=
+                       std::string::npos,
+                   "R-067: a grelha não desliga o depth test (a janela "
+                   "W-1: depth OFF durante o draw)");
+        EXPECT_MSG(code.find("glDisable(GL_CULL_FACE);") !=
+                       std::string::npos,
+                   "R-067: a grelha não desliga o cull (a janela W-1)");
+        EXPECT_MSG(code.find("glBlendFunc(GL_SRC_ALPHA, "
+                                "GL_ONE_MINUS_SRC_ALPHA);") !=
+                       std::string::npos,
+                   "R-067: a grelha perdeu o blend src-alpha (a janela W-1)");
         EXPECT_MSG(code.find("glEnable(GL_DEPTH_TEST);") !=
                        std::string::npos,
-                   "R-067: a grelha voltou a INHERITAR o depth test");
-        EXPECT_MSG(code.find("glDepthFunc(GL_LESS);") != std::string::npos,
-                   "R-067: a grelha perdeu o depth func explícito");
+                   "R-067: a grelha não repõe o depth test (a janela W-1 "
+                   "FECHA com depth ON)");
+        EXPECT_MSG(code.find("glEnable(GL_CULL_FACE);") !=
+                       std::string::npos,
+                   "R-067: a grelha não repõe o cull (a janela W-1)");
+        EXPECT_MSG(code.find("glDisable(GL_BLEND);") != std::string::npos,
+                   "R-067: a grelha não repõe o blend (a janela W-1)");
     }
     // (4) a entrada do pass 3D repõe o depth func (defesa em profundidade)
     {
@@ -9819,4 +9843,94 @@ TEST(regress_utf8_z2_f5) {
     // crash, nunca loop, sempre avança)
     EXPECT_MSG(code.find("return 0xFFFDu;") != std::string::npos,
                "R-075: o U+FFFD saiu (o contrato do decodificador morreu)");
+}
+
+// R-076 — regress_architecture (0.12-W-1): A ARQUITETURA DO DONO — O CÉU
+// POR DEFEITO, O CLIMA POR NOME, A GRELHA NA JANELA EXATA. As três
+// mutações da W-1 (coladas no RELATORIO-0.12-W-1-ARCHITECTURE.md §7):
+//   M-W1 — o fromEnvironment IGNORA o WorldEnvironment (os params ficam
+//          nos defaults mesmo com WE na cena);
+//   M-W2 — o findWeatherTarget NÃO procura o emissor pelo nome (o fluxo
+//          dos DOIS TICs morre);
+//   M-W3 — a grelha NÃO repõe o estado GL (o depth/cull/blend vazam para
+//          a geometria).
+TEST(regress_architecture) {
+    // ---- M-W1: o OVERRIDE do WorldEnvironment (runtime — a FONTE ÚNICA do
+    // mapeamento vive no Params::fromEnvironment; o main e ESTE sentinela
+    // partilham a MESMA conta)
+    {
+        Environment env;
+        env.skyType = Environment::kSkyTypeProcedural;
+        env.timeOfDay = 22.0f;
+        env.cloudCoverage = 0.7f;
+        env.starDensity = 1.0f;
+        env.moonBrightness = 0.9f;
+        env.clampFields();
+        sky::SkyGrade g{};
+        sky::dayNightGrade(env.timeOfDay, env.skyColorHorizon,
+                           env.skyColorZenith, env.sunColor, g);
+        SkyRenderer::Params sp;
+        sp.fromEnvironment(&env, g, 0.0f, 0.0f);
+        EXPECT_MSG(nearEqF(sp.coverage, 0.7f, 1e-5f),
+                   "R-076: o céu IGNOROU o WorldEnvironment (a cobertura "
+                   "fica no default — M-W1)");
+        EXPECT_MSG(nearEqF(sp.starThresh, 112.0f, 1e-3f),
+                   "R-076: o limiar das estrelas não nasce do WE (M-W1)");
+        EXPECT_MSG(nearEqF(sp.moonBright, 0.9f, 1e-5f),
+                   "R-076: o brilho da lua não nasce do WE (M-W1)");
+        f32 m22[3];
+        sky::moonDirFromTime(22.0f, m22);
+        EXPECT_MSG(nearEqF(sp.moonDir[1], m22[1], 1e-4f),
+                   "R-076: a lua não segue o relógio do WE (M-W1)");
+        // e SEM WorldEnvironment os DEFAULTS da casa (a decisão 1 do dono)
+        SkyRenderer::Params sd;
+        sd.fromEnvironment(nullptr, g, 0.0f, 0.0f);
+        EXPECT_MSG(nearEqF(sd.coverage, sky::kNoEnvCoverage, 1e-5f),
+                   "R-076: sem WE a cobertura default morreu (a decisão 1)");
+        EXPECT_MSG(nearEqF(sd.starThresh, 184.0f, 1e-3f),
+                   "R-076: sem WE o limiar default morreu (a decisão 1)");
+    }
+    // ---- M-W2: o EMISSOR PELO NOME (runtime — o fluxo dos DOIS TICs)
+    {
+        Scene s;
+        const Handle hpe = createTicFromPreset(s, PresetKind::ParticleEmitter,
+                                               nullptr, nullptr);
+        s.get(hpe)->name = "RainEmitter";
+        const Handle hae = createTicFromPreset(s,
+                                               PresetKind::WeatherController,
+                                               nullptr, nullptr);
+        Tic* aeTic = s.get(hae);
+        AmbientEnvironment* ae =
+            aeTic ? aeTic->getComponent<AmbientEnvironment>() : nullptr;
+        EXPECT_MSG(ae != nullptr &&
+                       findWeatherTarget(s, *aeTic, *ae) ==
+                           s.get(hpe)->getComponent<ParticleEmitter>(),
+                   "R-076: o controlador NÃO acha o emissor pelo nome "
+                   "(M-W2 — o fluxo dos DOIS TICs morreu)");
+        EXPECT_MSG(ae != nullptr && ae->targetEmitter == "RainEmitter",
+                   "R-076: o default do alvo saiu do contrato do dono");
+    }
+    // ---- M-W3: a grelha REPÕE o estado GL (o fonte é o contrato — a
+    // janela EXATA da W-1 fecha com depth/cull ON + blend OFF, DEPOIS do
+    // draw; o pin grid_no_context_corruption aprofunda a ORDEM)
+    {
+        std::string g;
+        EXPECT(readFileText(REPO_ROOT "/app/src/main/cpp/render/Grid.cpp",
+                            g));
+        const std::string code = test::stripCppComments(g);
+        const size_t iDraw = code.find("glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);");
+        EXPECT_MSG(iDraw != std::string::npos,
+                   "R-076: o draw da grelha sumiu do Grid.cpp");
+        const size_t iDepOn = code.find("glEnable(GL_DEPTH_TEST);");
+        const size_t iCullOn = code.find("glEnable(GL_CULL_FACE);");
+        const size_t iBlendOff = code.find("glDisable(GL_BLEND);");
+        EXPECT_MSG(iDepOn != std::string::npos &&
+                       iCullOn != std::string::npos &&
+                       iBlendOff != std::string::npos,
+                   "R-076: a grelha NÃO repõe o estado GL (M-W3 — o "
+                   "depth/cull/blend vazam para a geometria)");
+        EXPECT_MSG(iDepOn > iDraw && iCullOn > iDraw && iBlendOff > iDraw,
+                   "R-076: a reposição da grelha veio ANTES do draw (a "
+                   "janela não fecha — M-W3)");
+    }
 }

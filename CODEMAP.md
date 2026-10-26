@@ -1,8 +1,27 @@
 # CODEMAP.md — onde vive o quê
 
-Atualizado: 2026-10-24 · vc: 124
+Atualizado: 2026-10-26 · vc: 138
 
-> 0.12-Y-F2: o CLIMA E O VENTO — o
+> 0.12-W-1: A ARQUITETURA DO CÉU E DO CLIMA — o
+> app/src/main/cpp/render/SkyRenderer.h ganha A FONTE ÚNICA do
+> mapeamento WE→params (Params::fromEnvironment: sem WorldEnvironment
+> os defaults da casa tod 12.0/cobertura 0.3; com WE o override — a
+> decisão 1 do dono) + A LUA (moonDirFromTime/moonDisk/moonPhaseLit —
+> as fases pelo terminador, o glow) + o limiar das estrelas do
+> starDensity (starThreshFromDensity) + a INVERSA dirToNdc (as sondas
+> de píxel); o FS (render/SkyRenderer.cpp) ganha `precision highp
+> int;` (O ACHADO GPU: int/uint MEDIUMP matavam o hash das
+> nuvens/estrelas no rasterizador real — os elementos celestes NUNCA
+> desenharam no GPU antes da W-1). O AmbientEnvironment
+> (app/src/main/cpp/components/AmbientEnvironment.h) é o CONTROLADOR
+> com o ALVO POR NOME (targetEmitter — findWeatherTarget/
+> applyWeatherToTarget no app/src/main/cpp/core/Presets.cpp: o MESMO
+> TIC primeiro, o NOME depois, o warn edge-triggered 1×; o preset
+> WeatherController no menu "+"). A GRELHA (app/src/main/cpp/render/
+> Grid.cpp) desenha DENTRO do drawTics (céu→grelha→geometria) com a
+> janela GL EXATA da W-1. Pins: test_012w1_arch + R-076 + o raster
+> --w1.
+> 0.12-Y-F2: o
 > app/src/main/cpp/components/WindTIC.h (o vento GLOBAL, a fonte pura
 > windVector) + o app/src/main/cpp/components/AmbientEnvironment.h (o
 > clima CONFIGURA o ParticleEmitter do MESMO TIC — applyWeatherPreset/

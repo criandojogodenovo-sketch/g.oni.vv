@@ -6560,9 +6560,18 @@ i32 onInputEvent(android_app* /*app*/, AInputEvent* event) {
 // sky::viewBasis; a orbit e a câmara de jogo passam as duas por lookAt).
 // O CÉU PROCEDURAL desenha PRIMEIRO no bloco do Environment (o clear de
 // sempre fica byte a byte — o quad pinta POR CIMA dele com skyType 1).
+// 0.12-W-1: a GRELHA desenha DENTRO do passe, logo a seguir ao céu e ANTES
+// da geometria (a janela GL do dono: depth OFF/cull OFF/blend ON durante —
+// a oclusão dos TICs vem da ORDEM DE PINTURA; ver Grid::draw) e o
+// camFocus alimenta o passo adaptativo (o zoom da câmara manda no step).
+// stGridOut recebe as métricas da grelha (o chamador soma na statusLine).
 DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
-                   const Mat4& proj, f32 partMinW) {
+                   const Mat4& proj, f32 partMinW, f32 camFocus = 0.0f,
+                   DrawStats* stGridOut = nullptr) {
     DrawStats st{};
+    if (stGridOut) {
+        *stGridOut = DrawStats{};
+    }
     g_blockFrame = BlockFrameStats{};   // as métricas DO frame (HUD/log)
     g_skinFrame = SkinFrameStats{};
     g_impFrame = ImpostorFrameStats{};
@@ -6605,15 +6614,31 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
         // 0.12-Y-E: a grade do dia/noite + o ângulo do sol — UMA VEZ por
         // frame (a identidade quando não há ciclo: o w=0 do meio-dia
         // devolve as cores do utilizador; a luz recebe o par de sempre)
+        // 0.12-W-1: skyDraw estende o skyCyc — o quad do céu também desenha
+        // SEM WorldEnvironment (o DEFAULT da casa: o tod 12.0 do dono + a
+        // cobertura 0.3; as cores da identidade Y-E). O skyCyc (o SYNC do
+        // lit com o sol do ciclo) continua SÓ com o WE procedural — sem WE
+        // o lit fica byte a byte (a decisão W-1 é do CÉU, não da luz).
         sky::SkyGrade gradeNow{};
         f32 sunDirNow[3] = {0.4545f, 0.7435f, 0.2891f};
         bool skyCyc = false;
+        bool skyDraw = false;
         if (env != nullptr &&
             env->skyType == Environment::kSkyTypeProcedural) {
             skyCyc = true;
+            skyDraw = true;
             sky::dayNightGrade(env->timeOfDay, env->skyColorHorizon,
                                env->skyColorZenith, env->sunColor, gradeNow);
             sky::sunDirFromTime(env->timeOfDay, sunDirNow);
+        } else if (env == nullptr) {
+            // 0.12-W-1 — O DEFAULT SEM WorldEnvironment: a grade do
+            // meio-dia sobre as cores da identidade (o w=0 devolve-as
+            // exatas) e o sol do relógio default
+            skyDraw = true;
+            sky::dayNightGrade(sky::kNoEnvTod, Environment::kHorizonDefault,
+                               Environment::kZenithDefault,
+                               Environment::kSunColDefault, gradeNow);
+            sky::sunDirFromTime(sky::kNoEnvTod, sunDirNow);
         }
         // 0.12-Y-F2: o FLASH da TROVOADA — o 1.º AmbientEnvironment ATIVO
         // em STORM manda (o update do timer corre no frame, ANTES do
@@ -6636,35 +6661,27 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
             glClearColor(env->skyColor[0], env->skyColor[1],
                          env->skyColor[2], 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
-            // 0.12-Y (3.Y-D) — O CÉU PROCEDURAL: com skyType == 1 o quad
-            // fullscreen pinta POR CIMA do clear (o gradiente + o sol + as
-            // nuvens com O TEMPO ACUMULADO g_skyTime — a ordem do dono:
-            // «Passa o time acumulado do motor para o shader»). O 0 = o
-            // clear de sempre (o quad NEM EXISTE no frame — byte a byte).
-            // 0.12-Y-E — O CICLO DIA/NOITE: as cores chegam JÁ graduadas
-            // (a grade acima corre no CPU 1× por frame, nunca por pixel).
-            if (skyCyc && g_sky.ok() && showSky) {
-                const gldbg::PassState skyIn = gldbg::capture();   // 0.12-Z F0
-                SkyRenderer::Params sp;
-                sky::viewBasis(view, sp.right, sp.up, sp.fwd);
-                sp.aspect = sky::aspectFromProj(proj);
-                sp.tanHalfFovY = sky::tanFovYFromProj(proj);
-                sp.time = g_skyTime;
-                sp.coverage = env->cloudCoverage;
-                sp.speed = env->cloudSpeed;
-                sp.height = env->cloudHeight;
-                sp.stars = gradeNow.stars;
-                sp.thunder = thunderNow;   // 0.12-Y-F2: o flash da trovoada
-                for (int i = 0; i < 3; ++i) {
-                    sp.horizon[i] = gradeNow.hor[i];
-                    sp.zenith[i] = gradeNow.zen[i];
-                    sp.sunCol[i] = gradeNow.sun[i];
-                    sp.sunDir[i] = sunDirNow[i];
-                }
-                g_sky.draw(sp);
-                gldbg::passBoundary("ceu", skyIn, gldbg::capture());
-                gldbg::checkErrors("ceu");
-            }
+        }
+        // 0.12-W-1 (A DECISÃO DE ARQUITETURA DO DONO): o quad do céu
+        // desenha com WE procedural (o OVERRIDE — o caminho da Y-D) OU SEM
+        // WorldEnvironment NENHUM (o DEFAULT da casa: timeOfDay 12.0,
+        // cloudCoverage 0.3 — o mapeamento ÚNICO vive no
+        // Params::fromEnvironment, o main e os pins partilham). O WE com céu
+        // SÓLIDO mantém o clear de sempre (byte a byte — o quad NEM EXISTE).
+        // 0.12-Y-E: as cores chegam JÁ graduadas (a grade corre no CPU 1×
+        // por frame, nunca por pixel) + 0.12-W-1: a lua e o limiar/brilho
+        // das estrelas viajam nos uniforms novos (o uTime continua o
+        // ÚLTIMO 1f — o contrato do pin da D).
+        if (skyDraw && g_sky.ok() && showSky) {
+            const gldbg::PassState skyIn = gldbg::capture();   // 0.12-Z F0
+            SkyRenderer::Params sp;
+            sky::viewBasis(view, sp.right, sp.up, sp.fwd);
+            sp.aspect = sky::aspectFromProj(proj);
+            sp.tanHalfFovY = sky::tanFovYFromProj(proj);
+            sp.fromEnvironment(env, gradeNow, thunderNow, g_skyTime);
+            g_sky.draw(sp);
+            gldbg::passBoundary("ceu", skyIn, gldbg::capture());
+            gldbg::checkErrors("ceu");
         }
         const f32 density = env ? env->fogDensity : 0.0f;
         const f32* fogc = env ? env->fogColor : theme::kTheme.bg;
@@ -6686,6 +6703,31 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
                 lit->setLight(kLitDirId, kLitColId);
             }
         }
+    }
+    // 0.12-W-1 — A GRELHA (o bug do dono): desenhada DEPOIS do céu e ANTES
+    // da geometria, com a janela GL EXATA da W-1 (Grid::draw: depth OFF +
+    // cull OFF + blend src-alpha durante; depth ON + cull ON + blend OFF
+    // depois — o M-W3 vigia a reposição). A ordem «grelha ANTES do céu» do
+    // prompt é IMPOSSÍVEL com o passe fullscreen do céu (o quad depth-OFF
+    // apagaria a grelha — a PROVA de píxel vive no raster W-1: a mutação
+    // da ordem mata os píxeis da grelha); a ordem câmara→céu→grelha→TICs
+    // preserva o corte visual ZERO da Z2-F2 (o tom de chão) e a oclusão
+    // dos TICs pela pintura. A PROJEÇÃO é a da câmara do frame (o vp —
+    // nunca hardcoded) e o ZOOM manda no passo/fade/extent (Grid.h).
+    {
+        // 0.12-Z F0: a grelha respeita o toggle (com "tudo off menos a
+        // grelha" ela tem de aparecer SEMPRE — o pin isola)
+        const bool showGrid = !gldbg::g_masks.master || gldbg::g_masks.grid;
+        const gldbg::PassState gridIn = gldbg::capture();
+        const DrawStats stGrid =
+            showGrid ? g_grid.draw(vp, camEye, camFocus) : DrawStats{};
+        if (stGridOut) {
+            *stGridOut = stGrid;   // as métricas viajam SEPARADAS (a
+                                   // statusLine soma st3d + stGrid — a
+                                   // contagem da casa fica exata)
+        }
+        gldbg::passBoundary("grelha", gridIn, gldbg::capture());
+        gldbg::checkErrors("grelha");
     }
     const auto& mrs = comps.meshRenderers();
     f32 skinPlanes[6][4];
@@ -7135,11 +7177,30 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
             // do observador (fx::followOrigin — o volume do mundo); o
             // jorro do UTILIZADOR fica na origem do TIC (byte a byte). O
             // orçamento do FPS toca SÓ o clima.
+            // 0.12-W-1: o clima também vive no EMISSOR ALVO — o TIC cujo
+            // NOME é o targetEmitter de um AmbientEnvironment ATIVO (o
+            // fluxo dos DOIS TICs: o "RainEmitter" controlado pelo
+            // "WeatherController" segue a câmara e paga o orçamento como
+            // o clima da Y-F2; o jorro do utilizador — sem AE no TIC e sem
+            // nome de alvo — fica na origem, byte a byte)
             const AmbientEnvironment* ae =
                 pt->getComponent<AmbientEnvironment>();
-            const bool isWeather =
+            bool isWeather =
                 ae && ae->active &&
                 ae->weatherType != AmbientEnvironment::kWeatherNone;
+            if (!isWeather) {
+                const auto& aesW = comps.ambients();
+                for (u32 a = 0; a < aesW.size(); ++a) {
+                    const Tic* at = g_scene.get(aesW.owner(a));
+                    if (at && at->active && aesW.at(a).active &&
+                        aesW.at(a).weatherType !=
+                            AmbientEnvironment::kWeatherNone &&
+                        aesW.at(a).targetEmitter == pt->name) {
+                        isWeather = true;
+                        break;
+                    }
+                }
+            }
             const Transform3D* tr = pt->getComponent<Transform3D>();
             if (!tr && !isWeather) {
                 continue;   // sem Transform não há origem (o preset SEMPRE
@@ -8136,7 +8197,11 @@ void frame() {
                                             viewHPx);
         }
     }
-    const DrawStats st3d = drawTics(vp, camEye, view, proj, partMinW);
+    DrawStats stGrid{};   // 0.12-W-1: a grelha desenha DENTRO do pass3D (o
+                          // drawTics devolve as métricas por AQUI — a soma
+                          // da statusLine/bench fica a de sempre)
+    const DrawStats st3d =
+        drawTics(vp, camEye, view, proj, partMinW, camFocus, &stGrid);
     // 0.10-M (PASSO 4) — o LOG das métricas reais (AQUI: editor E play — o
     // statusLine de baixo só vive em play; throttled 1×/s e só quando o nº
     // de desenhados MUDA — o orbit do dono produz a linha quando o culling
@@ -8205,14 +8270,8 @@ void frame() {
                        g_impFrame.drawn);
         }
     }
-    // 0.12-Z F0: a GRELHA respeita o toggle (com "tudo off menos a
-    // grelha" ela tem de aparecer SEMPRE — o pin isola)
-    const bool showGrid = !gldbg::g_masks.master || gldbg::g_masks.grid;
-    const gldbg::PassState gridIn = gldbg::capture();
-    const DrawStats stGrid = showGrid ? g_grid.draw(vp, camEye, camFocus)
-                                      : DrawStats{};
-    gldbg::passBoundary("grelha", gridIn, gldbg::capture());
-    gldbg::checkErrors("grelha");
+    // (a grelha desenhou DENTRO do drawTics — 0.12-W-1: depois do céu,
+    // antes da geometria, com a janela GL do dono; ver o bloco no pass3D)
     if (scissor3d) {
         glDisable(GL_SCISSOR_TEST);   // a UI nunca é recortada (beginUiPass
                                       // também repõe — defesa em camadas)
@@ -9158,6 +9217,20 @@ void frame() {
                     LOGI("editor: TIC %s criado (clima+emissor no MESMO "
                          "TIC)", presetName(kind));
                 }
+            } else if (choice == 14) {
+                // 0.12-W-1 — TIC "WeatherController": Transform +
+                // AmbientEnvironment SÓ (o CONTROLADOR do dono: o emissor é
+                // UM TIC À PARTE — cria um ParticleEmitter e RENOMEIA-O
+                // para "RainEmitter" (ou aponta o alvo no Inspector); a
+                // criação LIGA os dois se o alvo já existir na cena)
+                const Handle hnew =
+                    createTicUndoable(PresetKind::WeatherController);
+                if (hnew.valid()) {
+                    editor::selectTic(g_editor, hnew);
+                    showToast("WeatherController criado (alvo: RainEmitter)");
+                    LOGI("editor: TIC WeatherController criado (o controlador "
+                         "— o emissor é um TIC à parte, por nome)");
+                }
             } else {
                 const PresetKind kind = static_cast<PresetKind>(choice - 1);
                 const Handle hnew = createTicUndoable(kind);
@@ -9955,6 +10028,7 @@ void frame() {
                             : g_editor.textPurpose == 13 ? "COR DO HORIZONTE"
                             : g_editor.textPurpose == 14 ? "COR DO ZÉNITE"
                             : g_editor.textPurpose == 15 ? "COR DO SOL"
+                            : g_editor.textPurpose == 18 ? "ALVO DO CLIMA"
                                                         : "ALVO DA AÇÃO";
         const int ch =
             editor::drawTextInput(g_ui, g_input, w, h, g_editor, title);

@@ -21,6 +21,7 @@
 #include "render/Primitives.h"            // 0.8.0: seletor de primitivas
 #include "render/Mesh.h"                 // 0.8.9: AABB do mesh (normalização uniforme)
 #include "core/Scene.h"
+#include "core/Presets.h"   // 0.12-W-1: applyWeatherToTarget (o alvo do clima)
 #include "core/TransformSystem.h"   // 0.12-V: o feedback imediato compõe com o pai
 #include "core/Project.h"   // 0.12-B (B-4): kDirScenes (o caminho das cenas)
 #include "ui/UiEditor.h"                  // 0.8.6: uiHexFormat (linha hex)
@@ -1671,6 +1672,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     char peColBHex[12] = "";     // 0.12-Y-F1: o hex da cor de fim
     char peTexLabel[96] = "";    // 0.12-Y-F1: o rótulo do botão textura
     char ambWeatherLabel[32] = "";   // 0.12-Y-F2: o rótulo do clima
+    char ambTargetLabel[64] = "";    // 0.12-W-1: o rótulo do alvo do clima
     if (envEdit) {
         if (!envEdit->hdriPath.empty()) {
             std::snprintf(envHdriLabel, sizeof(envHdriLabel), "hdri: %s",
@@ -1706,6 +1708,12 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                                                "trovoada"};
         std::snprintf(ambWeatherLabel, sizeof(ambWeatherLabel), "clima: %s",
                       kWeatherNames[aeEdit->weatherType & 3u]);
+        // 0.12-W-1: o rótulo do ALVO (o nome do TIC do emissor — o fluxo dos
+        // DOIS TICs; vazio = o aviso honesto)
+        std::snprintf(ambTargetLabel, sizeof(ambTargetLabel), "alvo: %s",
+                      aeEdit->targetEmitter.empty()
+                          ? "-"
+                          : aeEdit->targetEmitter.c_str());
     }
     char camProjLabel[48] = "";   // 0.7.7
     char camActiveLabel[48] = "";
@@ -2842,6 +2850,56 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 }
             }
             break;
+        case InspRow::Kind::EnvStarD:
+            // 0.12-W-1 — slider DENSIDADE ESTRELAS 0..1 (o limiar do campo:
+            // 0.5 = o céu da Y-E byte a byte; 0 apaga o campo; 1 enche)
+            if (envEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm,
+                              "densidade estrelas", 0.0f, 1.0f,
+                              envEdit->starDensity, "%.2f")) {
+                    envEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::EnvStarB:
+            // 0.12-W-1 — slider BRILHO ESTRELAS 0..1 (o ganho dos pontos —
+            // o default 0.8 do dono)
+            if (envEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm,
+                              "brilho estrelas", 0.0f, 1.0f,
+                              envEdit->starBrightness, "%.2f")) {
+                    envEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::EnvMoonP:
+            // 0.12-W-1 — slider FASE DA LUA 0..1 (0 = nova · 0.5 = cheia ·
+            // 1 = nova — o terminador do disco)
+            if (envEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "fase da lua",
+                              0.0f, 1.0f, envEdit->moonPhase, "%.2f")) {
+                    envEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::EnvMoonB:
+            // 0.12-W-1 — slider BRILHO DA LUA 0..1 (0 = sem lua no céu — o
+            // default 0.6 do dono)
+            if (envEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "brilho da lua",
+                              0.0f, 1.0f, envEdit->moonBrightness, "%.2f")) {
+                    envEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
         case InspRow::Kind::PeSection: {
             // 0.12-Y-F1 — o cabeçalho COLAPSÁVEL da secção (o MESMO
             // padrão do AuSection: título 14sp + chevron + bit persistente)
@@ -3097,17 +3155,25 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         case InspRow::Kind::AmbInt:
             // 0.12-Y-F2 — slider INTENSIDADE 0..1 (o COUNT do preset
             // escala: 1500/800/2000 × intensity; a REAPLICAÇÃO do preset
-            // mantém o emissor honesto com o clima visível)
+            // mantém o emissor honesto com o clima visível). 0.12-W-1: a
+            // reaplicação vai pela FONTE ÚNICA (applyWeatherToTarget — o
+            // MESMO TIC primeiro, o ALVO POR NOME depois)
             if (aeEdit) {
                 ui.auditRowFloorNext(layout::kRowFloorDp);
                 if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "intensidade",
                               0.0f, 1.0f, aeEdit->intensity, "%.2f")) {
                     aeEdit->clampFields();
-                    aeEdit->applyWeatherPreset(
-                        tic->getComponent<ParticleEmitter>());
+                    applyWeatherToTarget(scene, *tic, *aeEdit);
                     edited = true;
                 }
             }
+            break;
+        case InspRow::Kind::AmbTarget:
+            // 0.12-W-1 — o botão do ALVO (o nome do TIC do emissor — o
+            // teclado 18 edita; a LÓGICA vive no despacho do tap)
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      ambTargetLabel);
             break;
         case InspRow::Kind::EnvSky: {
             // "céu: #RRGGBB" + swatch VIVO (o MESMO padrão da linha hex do
@@ -3256,6 +3322,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind != InspRow::Kind::PeColB &&      // 0.12-Y-F1: hex fim
                 r.kind != InspRow::Kind::PeTex &&       // 0.12-Y-F1: navegador
                 r.kind != InspRow::Kind::AmbWeather &&  // 0.12-Y-F2: o clima
+                r.kind != InspRow::Kind::AmbTarget &&   // 0.12-W-1: o alvo
                 !isSection &&                           // 0.9.0: colapsar
                 r.kind != InspRow::Kind::TransformRow &&// 0.9.0: caixas X/Y/Z + R
                 r.kind != InspRow::Kind::Slider) {      // 0.8.9: zona do VALOR
@@ -3491,22 +3558,25 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 }
             } else if (r.kind == InspRow::Kind::AmbWeather) {
                 // 0.12-Y-F2 — o CICLAR do clima (o padrão CamProj: tocar
-                // avança nenhum→chuva→neve→trovoada). A MUDANÇA chama o
-                // applyWeatherPreset NO ParticleEmitter DO MESMO TIC (a
-                // decisão de arquitetura do dono; sem PE: o aviso honesto)
+                // avança nenhum→chuva→neve→trovoada). 0.12-W-1: a MUDANÇA
+                // aplica pela FONTE ÚNICA (applyWeatherToTarget — o PE do
+                // MESMO TIC primeiro, o TIC com o NOME targetEmitter depois;
+                // sem nenhum dos dois: o WARN edge-triggered 1× de lá)
                 if (AmbientEnvironment* e =
                         tic->getComponent<AmbientEnvironment>()) {
                     e->weatherType =
                         static_cast<u8>((e->weatherType + 1u) & 3u);
                     e->clampFields();
-                    if (!e->applyWeatherPreset(
-                            tic->getComponent<ParticleEmitter>())) {
-                        elog::warn("ambient: TIC '%s' tem clima sem "
-                                   "ParticleEmitter — o preset não aplica "
-                                   "(add um ParticleEmitter ao MESMO TIC)",
-                                   tic->name.c_str());
-                    }
+                    applyWeatherToTarget(scene, *tic, *e);
                     edited = true;
+                }
+            } else if (r.kind == InspRow::Kind::AmbTarget) {
+                // 0.12-W-1 — o ALVO POR NOME: o teclado in-app (propósito
+                // 18) edita o targetEmitter; o buffer nasce com o nome atual
+                if (AmbientEnvironment* e =
+                        tic->getComponent<AmbientEnvironment>()) {
+                    openTextInput(st, 18, st.selected, -1,
+                                  e->targetEmitter.c_str());
                 }
             } else if (r.kind == InspRow::Kind::EnvHdri) {
                 // 0.12-Y-fix — o NAVEGADOR com a intenção HDRI (o flag é o
@@ -3800,7 +3870,9 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     // 0.12-Y (3.Y-C): o 8.º preset do 3D é o TIC "WorldEnvironment"
     // 0.12-Y-F1: o 9.º é o TIC "ParticleEmitter" (as partículas GPU)
     // 0.12-Y-F2: o 10.º..13.º são Wind / Rain / Snow / Storm (o clima)
-    const int kItems = uiMode ? 10 : 13;   // 0.7.7: Camera; 0.8.0: Mesh; 0.8.11: Audio; 0.12-Y: WorldEnvironment; 0.12-Y-F1: Partículas; 0.12-Y-F2: Wind/Rain/Snow/Storm
+    // 0.12-W-1: o 14.º é o WeatherController (o CONTROLADOR de DOIS TICs —
+    // o emissor "RainEmitter" vive NOUTRO TIC, ligado pelo nome)
+    const int kItems = uiMode ? 10 : 14;   // 0.7.7: Camera; 0.8.0: Mesh; 0.8.11: Audio; 0.12-Y: WorldEnvironment; 0.12-Y-F1: Partículas; 0.12-Y-F2: Wind/Rain/Snow/Storm; 0.12-W-1: WeatherController
     // PASSO 1 (0.9.6.14): as linhas do menu são alvos de 40dp (a LEI DE
     // OURO — eram 56 num passo de 64; nada ≥48 no editor)
     const f32 rowH = 40.0f;
@@ -3836,10 +3908,11 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     // nasce A ativa — o main chama setOnlyActiveCamera)
     // 0.8.0 (F7): o 6º é o TIC "Mesh" (esfera procedural, SEM física)
     // 0.8.11: o 7º é o TIC "Audio" (Transform+AudioPlayer, SEM mesh)
-    const char* names[13] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
+    const char* names[14] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
                              "RigidBody3D", "Camera", "Mesh", "Audio",
                              "WorldEnvironment", "ParticleEmitter",
-                             "Wind", "Rain", "Snow", "Storm"};
+                             "Wind", "Rain", "Snow", "Storm",
+                             "WeatherController"};
     // 0.7.4: + VBox/HBox (containers de layout — filhos automáticos)
     const char* elems[10] = {"Panel", "Label", "Button", "Image",
                              "Menu", "Card", "Article", "Joystick",

@@ -1,16 +1,25 @@
 #pragma once
-// components/AmbientEnvironment.h — o TIC DE CLIMA (0.12-Y-F2).
+// components/AmbientEnvironment.h — o TIC DE CLIMA (0.12-Y-F2 · 0.12-W-1).
 //
-// A DECISÃO DE ARQUITETURA DO DONO (OBRIGATÓRIA — a opção A): o
-// AmbientEnvironment NÃO renderiza partículas. Ele CONFIGURA o
-// ParticleEmitter do MESMO TIC quando o weatherType muda (a função
-// applyWeatherPreset) e gere o FLASH da trovoada (runtime, desenhado
-// pelo céu via uThunderFlash — sem geometria de raio). Se o TIC não
-// tem ParticleEmitter, applyWeatherPreset não faz nada (o dono sabe —
-// o log fala 1× por mudança, o spam morre).
+// A DECISÃO DE ARQUITETURA DO DONO (OBRIGATÓRIA — a Y-F2, REFINADA pela
+// W-1): o AmbientEnvironment NÃO renderiza partículas. É um CONTROLADOR:
+// configura UM ParticleEmitter e gere o FLASH da trovoada (runtime, no céu
+// via uThunderFlash — sem geometria de raio). A W-1 adiciona o ALVO POR
+// NOME — o fluxo do dono com DOIS TICs separados:
+//   TIC "RainEmitter"     — ParticleEmitter + Transform (o emissor)
+//   TIC "WeatherController" — AmbientEnvironment (targetEmitter="RainEmitter")
+// A RESOLUÇÃO (a função findWeatherTarget do core/Presets — uma fonte):
+//   1.º o ParticleEmitter do MESMO TIC (o contrato da Y-F2 byte a byte —
+//       os presets Rain/Snow/Storm continuam a funcionar IGUAL);
+//   2.º SEM PE no TIC → o TIC ATIVO com o NOME targetEmitter que tenha um
+//       ParticleEmitter (o fluxo W-1 dos dois TICs);
+//   NENHUM dos dois → o LOG WARN 1× (edge-triggered — o flag
+//   targetWarned desarma o spam; o pin ambient_env_logs_warning aferre) e
+//   NADA acontece (o dono sabe — sem emissor não há clima).
 //
 //   weatherType — 0=NONE, 1=RAIN, 2=SNOW, 3=STORM (o Inspector cicla)
 //   intensity   — 0..1, escala o COUNT de partículas do preset
+//   targetEmitter — o NOME do TIC do emissor (default "RainEmitter")
 //   thunderFlash/thunderTimer — RUNTIME (nunca serializados): o flash
 //                 vive 1/3 de segundo (decay 3.0/s), o próximo raio
 //                 chega em random(3,8) s.
@@ -31,6 +40,7 @@
 #include "core/Types.h"
 #include "components/ParticleEmitter.h"
 #include <cmath>
+#include <string>
 
 namespace vv {
 
@@ -63,9 +73,17 @@ public:
     f32  intensity   = kIntensityDefault;
     bool active      = true;   // o 1.º ATIVO da cena manda (o padrão casa)
 
+    // 0.12-W-1 — O ALVO POR NOME (o fluxo do dono: DOIS TICs separados).
+    // O default é o nome do prompt; o serializer só escreve ≠ default.
+    static constexpr const char* kTargetDefault = "RainEmitter";
+    std::string targetEmitter = kTargetDefault;
+
     // runtime — NUNCA serializados (a cena carrega SEM raio pendente)
     f32 thunderFlash = 0.0f;
     f32 thunderTimer = 4.0f;   // o meio do intervalo — o 1.º raio cedo
+    // 0.12-W-1 — o warn do alvo É EDGE-TRIGGERED (1× por ausência; o alvo
+    // a aparecer o flag desarma — a próxima ausência volta a falar)
+    bool targetWarned = false;
 
     void clampFields() {
         if (weatherType > kWeatherStorm) {

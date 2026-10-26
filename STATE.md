@@ -1,9 +1,10 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-25 · vc: 137 · Último commit: este (a 0.12-Z2 F5 —
-O FECHO da campanha: as golden images, o fix estrutural do build_tests,
-o ASan/glslang e OS 2 GATES que a F4 partiu; o
-RELATORIO-0.12-Z2-F5.md);
+Atualizado: 2026-10-26 · vc: 138 · Último commit: este (a 0.12-W-1 —
+A ARQUITETURA DO CÉU E DO CLIMA: o céu procedural POR DEFEITO + o
+AmbientEnvironment CONTROLADOR com o ALVO POR NOME + a grelha na
+janela GL exata + A LUA e as estrelas do utilizador + O ACHADO GPU
+do highp int; o RELATORIO-0.12-W-1-ARCHITECTURE.md);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -11,22 +12,38 @@ RELATORIO-0.12-Z2-F5.md);
 
 ## §1 Onde estamos
 
+- **Campanha 0.12-W-1 — FECHADA (vc 138): A ARQUITETURA DO CÉU E DO
+  CLIMA** (a história no RELATORIO-0.12-W-1-ARCHITECTURE.md): a DECISÃO
+  DE ARQUITETURA do dono — o céu procedural EXISTE POR DEFEITO (Params::
+  fromEnvironment: sem WE os defaults tod 12.0/cobertura 0.3; com WE o
+  override) · o AmbientEnvironment CONTROLADOR com o ALVO POR NOME
+  (targetEmitter — o fluxo dos DOIS TICs "RainEmitter"+
+  "WeatherController", o warn edge-triggered 1×, o preset WeatherController
+  no menu, o RENAME adota) · a grelha na janela GL EXATA da W-1 (depth/
+  cull OFF + blend durante, TUDO reposto depois) DENTRO do pass3D
+  (céu→grelha→geometria — a ordem «grelha antes do céu» REFUTADA AO
+  VIVO: 8/9 goldens vermelhos) · A LUA (disco oposto ao sol, fases pelo
+  terminador, glow) + as estrelas com densidade/brilho (o limiar da Y-E
+  reproduzido exato em 0.5) · **O ACHADO GPU P0**: int/uint MEDIUMP no
+  FS do ES 3.0 — o hash inteiro colapsava e NUVENS/ESTRELAS NUNCA
+  desenharam no GPU real (os goldens da Z2 baselined um céu morto); a
+  cura `precision highp int` + goldens re-baselined ao céu VIVO (9/9
+  EXATO, grid_solo com o hash intacto) · o ACHADO DO ROUND-TRIP (o
+  kSunDirDefault não-unitário e o edit fantasma no .goni — o default
+  passa a ponto fixo bit-a-bit). Pins ×10 (test_012w1_arch.cpp) + R-076
+  + M-W1/M-W2/M-W3 VERMELHAS ao vivo + as provas de píxel do raster
+  --w1 (13/0: estrelas 366→0, lua 0.998→0.171→0.018, grelha 78866 px,
+  chuva por nome 1856 px). Divergências do prompt reportadas (vc
+  124→125 era o baseline velho — o real 137→138; R-065 ocupado — a nova
+  é R-076; WorldEnvironment.h/SkyShader.h são Environment.h/
+  SkyRenderer).
 - **Campanha 0.12-Z2 — F5 FECHADA (vc 137): O FECHO** (a história no
-  RELATORIO-0.12-Z2-F5.md): as GOLDEN IMAGES — a regressão POR IMAGEM
-  (as 9 cenas douradas determinísticas em tests/golden/ com os PNGs de
-  referência; o veredicto da casa EXATO/TOLERANCIA/FALHA com o diff PNG
-  vermelho; a mutação do kGroundDim 0.95 no FS VERMELHA AO VIVO: 4 cenas
-  FALHA a 47% de diff com grid_solo/clima EXATO — o isolamento provado)
-  + a R-074 (a maquinaria aferrada no test_core: os vetores do FNV da
-  casa, o parser, o veredicto, a máscara) + O FIX ESTRUTURAL do
-  build_tests.py (o rastreio de includes — a dívida da F4.5: o ABI
-  misturado morre) + ASan/UBSan no test_core e no raster + o glslang nos
-  shaders + OS 2 GATES QUE O COMMIT F4 PARTIU REPARADOS (o ui-vocab com
-  a 3.ª encodePngRgb do blackboxWorker — o MESMO padrão do thumb; o
-  release-identity com o §14-z). PROVADO pela API do GitHub: o CI do
-  e593c2f (F4) estava VERMELHO no job core (o ui-vocab) — o worklog da
-  F4 alegava verde; a divergência foi reportada e corrigida NESTE
-  commit.
+  RELATORIO-0.12-Z2-F5.md): as GOLDEN IMAGES (9 cenas douradas + o
+  veredicto EXATO/TOLERANCIA/FALHA com diff PNG; a mutação kGroundDim
+  VERMELHA AO VIVO) + a R-074 + o fix estrutural do build_tests.py +
+  ASan/UBSan/glslang + OS 2 GATES REPARADOS (PROVADO pela API: o CI
+  da F4 estava vermelho no ui-vocab — o worklog alegava verde; a
+  divergência reportada e corrigida).
 - **Campanha 0.12-Z2 — F4 (vc 136), F1-R (vc 135), F3 (vc 134),
   F1-BIS/F0/F1/F2 (vc 130..133) FECHADAS** (a história COMPLETA nos
   RELATORIO-0.12-Z2-{F1,F4,RASTER,AUDIT}.md — o índice não é o

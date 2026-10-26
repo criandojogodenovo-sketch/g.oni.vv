@@ -36,7 +36,15 @@ public:
     static constexpr f32 kHorizonDefault[3] = {0.2902f, 0.5647f, 0.8863f};
     static constexpr f32 kZenithDefault[3]  = {0.1176f, 0.2275f, 0.5412f};
     static constexpr f32 kSunColDefault[3]  = {1.0f, 0.8667f, 0.6667f};
-    static constexpr f32 kSunDirDefault[3]  = {0.5571f, 0.7428f, -0.3714f};
+    // 0.12-W-1 (O ACHADO DO ROUND-TRIP): o default antigo {0.5571, 0.7428,
+    // −0.3714} NÃO era unitário exato — a NORMALIZAÇÃO da clampFields
+    // mudava-lhe os bits (0.5571 → 0.557086) e o .goni ganhava um «edit
+    // fantasma» no sunDir ao round-trip (dump ≠ dump(load(dump))). O
+    // default passa a ser o PONTO FIXO bit-a-bit da normalização (len == 1
+    // exato em f32 — PROVADO no relatório W-1 §6); a direção visual é a
+    // MESMA da 3.Y-D (a 4.ª casa decimal).
+    static constexpr f32 kSunDirDefault[3]  = {0.557085991f, 0.742781341f,
+                                               -0.371390671f};
     static constexpr f32 kCoverageDefault = 0.4f;
     static constexpr f32 kSpeedDefault    = 0.02f;
     static constexpr f32 kSpeedMax        = 0.2f;   // o teto do slider (10×)
@@ -48,6 +56,16 @@ public:
     static constexpr f32 kHeightDefault   = 1.0f;   // a escala vertical das
     static constexpr f32 kHeightMin       = 0.25f;  // nuvens (o plano do FS)
     static constexpr f32 kHeightMax       = 4.0f;
+    // 0.12-W-1 — AS ESTRELAS E A LUA (a ordem do dono): as 4 propriedades
+    // novas do dia/noite. Os DEFAULTS são os do prompt; o starDensity 0.5
+    // reproduz o campo de SEMPRE byte a byte (o limiar 184 da Y-E — ver
+    // sky::starThreshFromDensity: 256−144·0.5 = 184) e o starBrightness
+    // 0.8 é o valor do dono (as estrelas da Y-E nasciam a 1.0 implícito —
+    // a mudança é do dono, documentada no relatório W-1)
+    static constexpr f32 kStarDensityDefault = 0.5f;   // 0..1 (a fracção de células)
+    static constexpr f32 kStarBrightDefault  = 0.8f;   // 0..1 (o ganho do ponto)
+    static constexpr f32 kMoonPhaseDefault   = 0.5f;   // 0..1 (0.5 = cheia)
+    static constexpr f32 kMoonBrightDefault  = 0.6f;   // 0..1 (0 = sem lua)
 
     f32 skyColor[4] = {0.040f, 0.045f, 0.065f, 1.0f};  // o céu (o clear)
     f32 fogColor[4] = {0.040f, 0.045f, 0.065f, 1.0f};  // a névoa
@@ -77,6 +95,13 @@ public:
     bool autoCycle     = false;        // o Auto Cycle avança o relógio
     f32 cloudHeight    = kHeightDefault;  // a escala vertical do plano das
                                        // nuvens (1 = o céu da D byte a byte)
+
+    // ---- 0.12-W-1: AS ESTRELAS E A LUA (o SkyRenderer lê quando
+    // skyType == procedural; o serializer só escreve ≠ default) ----------
+    f32 starDensity    = kStarDensityDefault;  // a fracção do campo (0.5 = a Y-E)
+    f32 starBrightness = kStarBrightDefault;   // o ganho dos pontos
+    f32 moonPhase      = kMoonPhaseDefault;    // 0= nova · 0.5 = cheia · 1 = nova
+    f32 moonBrightness = kMoonBrightDefault;   // 0 = sem lua no céu
 
     // 0.12-Z F2 — A REJEIÇÃO de NaN/inf (o dono: «rejeitar NaN/inf e usar
     // padrões»): as comparações com NaN são SEMPRE falsas — a clamp de
@@ -126,6 +151,13 @@ public:
         cloudCoverage = sane(cloudCoverage, kCoverageDefault, 0.0f, 1.0f);
         cloudSpeed    = sane(cloudSpeed, kSpeedDefault, 0.0f, kSpeedMax);
         timeOfDay     = sane(timeOfDay, kTodDefault, 0.0f, kTodMax);
+        // 0.12-W-1: as estrelas e a lua — o NaN volta ao DEFAULT do campo
+        // (o padrão da Z2-F1BIS: o default do campo, nunca um comportamento
+        // novo por corrupção) e a clamp 0..1 fecha o intervalo
+        starDensity    = sane(starDensity, kStarDensityDefault, 0.0f, 1.0f);
+        starBrightness = sane(starBrightness, kStarBrightDefault, 0.0f, 1.0f);
+        moonPhase      = sane(moonPhase, kMoonPhaseDefault, 0.0f, 1.0f);
+        moonBrightness = sane(moonBrightness, kMoonBrightDefault, 0.0f, 1.0f);
         // 0.12-Z2-F1BIS (auditoria do WE): o DEFAULT do NaN é o do campo
         // (0.0 = o auto-ciclo de sempre) — o 1.0 antigo LIGAVA o
         // auto-ciclo quando o .goni vinha corrompido (comportamento novo
@@ -147,6 +179,15 @@ public:
         if (dayCycleSpeed > kCycleMax) dayCycleSpeed = kCycleMax;
         if (cloudHeight < kHeightMin) cloudHeight = kHeightMin;
         if (cloudHeight > kHeightMax) cloudHeight = kHeightMax;
+        // 0.12-W-1: os tetos das estrelas/lua (0..1 — o slider da casa)
+        if (starDensity < 0.0f) starDensity = 0.0f;
+        if (starDensity > 1.0f) starDensity = 1.0f;
+        if (starBrightness < 0.0f) starBrightness = 0.0f;
+        if (starBrightness > 1.0f) starBrightness = 1.0f;
+        if (moonPhase < 0.0f) moonPhase = 0.0f;
+        if (moonPhase > 1.0f) moonPhase = 1.0f;
+        if (moonBrightness < 0.0f) moonBrightness = 0.0f;
+        if (moonBrightness > 1.0f) moonBrightness = 1.0f;
         // a direção do sol NORMALIZA (o FS só consome direção; a norma
         // própria é o contrato — o zero cai no default da tarde)
         const f32 len = std::sqrt(sunDirection[0] * sunDirection[0] +

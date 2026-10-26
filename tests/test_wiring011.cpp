@@ -837,7 +837,7 @@ TEST(wiring011_preset_audio_estrutura) {
     EXPECT(t->getComponent<MeshRenderer>() == nullptr);
     EXPECT(t->getComponent<BodyComp>() == nullptr);
     EXPECT(std::string(presetName(PresetKind::Audio)) == "Audio");
-    EXPECT(static_cast<u32>(PresetKind::Count) == 12);   // 0.12-Y-F2: +Wind/Rain/Snow/Storm
+    EXPECT(static_cast<u32>(PresetKind::Count) == 13);   // 0.12-Y-F2: +Wind/Rain/Snow/Storm · 0.12-W-1: +WeatherController
 
     // o REGISTRO cria por nome (o caminho do "+" e do serializer)
     Scene s2;
@@ -997,12 +997,12 @@ TEST(wiring011_plus_menu_3d_tem_audio) {
     editor::EditorState st;
     st.plusMenu = true;
     const f32 w = editor::kMenuW;
-    const f32 h = editor::kHeaderH + 13.0f * 48.0f + editor::kPad;   // PASSO 1 (0.12-Y-F2: 13 itens)
+    const f32 h = editor::kHeaderH + 14.0f * 48.0f + editor::kPad;   // PASSO 1 (0.12-Y-F2: 13 itens · 0.12-W-1: 14 com o WeatherController)
     const f32 x = (kSW - w) * 0.5f;
     const f32 y = (kSH - h) * 0.5f;
     // o 7º item (Audio) → choice 7 (o 8.º WorldEnvironment entrou na
     // 0.12-Y; o 9.º ParticleEmitter na 0.12-Y-F1; o Wind/Rain/Snow/Storm
-    // na 0.12-Y-F2)
+    // na 0.12-Y-F2; o 14.º WeatherController na 0.12-W-1)
     in.injectDown(0, x + w * 0.5f, y + editor::kHeaderH + 6.0f * 48.0f + 20.0f);
     ui.beginFrame(nullptr, &in, kSW, kSH);
     const int r = editor::drawPlusMenu(ui, in, kSW, kSH, st);

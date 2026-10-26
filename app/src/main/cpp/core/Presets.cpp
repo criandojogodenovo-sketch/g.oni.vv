@@ -9,6 +9,7 @@
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
 #include "core/Scene.h"
+#include "platform/EngineLog.h"   // 0.12-W-1: o warn do alvo ausente
 #include "render/Primitives.h"
 #include <cstdio>
 
@@ -34,6 +35,9 @@ const char* presetName(PresetKind kind) {
             return "Snow";               // 0.12-Y-F2
         case PresetKind::Storm:
             return "Storm";              // 0.12-Y-F2
+        case PresetKind::WeatherController:
+            return "WeatherController";  // 0.12-W-1 (o CONTROLADOR — o
+                                         // emissor é um TIC à parte)
         default:                          return "Tic";
     }
 }
@@ -140,6 +144,22 @@ Handle createTicFromPreset(Scene& scene, PresetKind kind,
         return h;
     }
 
+    // 0.12-W-1: o preset WEATHERCONTROLLER é ESTRUTURA — Transform +
+    // AmbientEnvironment SÓ (o CONTROLADOR do dono: o emissor é UM TIC À
+    // PARTE — o "RainEmitter" com ParticleEmitter + Transform; o alvo liga
+    // por NOME no targetEmitter). A criação APLICA o preset ao alvo SE ele
+    // já existir na cena (o dono cria o RainEmitter primeiro); sem alvo o
+    // WARN 1× diz o nome que falta — o utilizador cria/renomeia e o próximo
+    // edit (ou a recriação) liga os dois.
+    if (kind == PresetKind::WeatherController) {
+        AmbientEnvironment* ae = tic->addComponent<AmbientEnvironment>();
+        if (ae) {
+            ae->weatherType = AmbientEnvironment::kWeatherRain;
+            applyWeatherToTarget(scene, *tic, *ae);
+        }
+        return h;
+    }
+
     MeshRenderer* mr = tic->addComponent<MeshRenderer>();
     if (mr) {
         mr->mesh = mesh;
@@ -182,6 +202,48 @@ Handle createTicFromPreset(Scene& scene, PresetKind kind,
         }
     }
     return h;
+}
+
+// ---- 0.12-W-1: O ALVO DO CLIMA (a FONTE ÚNICA da resolução) -----------------
+ParticleEmitter* findWeatherTarget(Scene& scene, Tic& aeTic,
+                                   const AmbientEnvironment& ae) {
+    // 1.º o PE do MESMO TIC (o contrato da Y-F2 byte a byte — os presets
+    // Rain/Snow/Storm da casa trazem o emissor no próprio TIC)
+    if (ParticleEmitter* own = aeTic.getComponent<ParticleEmitter>()) {
+        return own;
+    }
+    // 2.º o TIC ATIVO com o NOME do alvo (o fluxo W-1 dos DOIS TICs). O
+    // scene.find devolve o 1.º ATIVO com o nome (o inativo não desenha —
+    // não é alvo honesto); o PE do TIC encontrado é o controlado.
+    if (ae.targetEmitter.empty()) {
+        return nullptr;
+    }
+    const Handle ht = scene.find(ae.targetEmitter);
+    Tic* t = scene.get(ht);
+    if (!t) {
+        return nullptr;
+    }
+    return t->getComponent<ParticleEmitter>();
+}
+
+bool applyWeatherToTarget(Scene& scene, Tic& aeTic,
+                          AmbientEnvironment& ae) {
+    ParticleEmitter* pe = findWeatherTarget(scene, aeTic, ae);
+    if (pe == nullptr) {
+        // o WARN EDGE-TRIGGERED: 1× por AUSÊNCIA (o flag desarma quando o
+        // alvo aparece — a próxima ausência volta a falar; o spam morre e
+        // o dono fica a saber O NOME que falta)
+        if (!ae.targetWarned) {
+            ae.targetWarned = true;
+            elog::warn("ambient: TIC '%s' tem clima sem emissor — o alvo "
+                       "'%s' não existe na cena (cria/renomeia um TIC "
+                       "ParticleEmitter com ESSE nome)",
+                       aeTic.name.c_str(), ae.targetEmitter.c_str());
+        }
+        return false;
+    }
+    ae.targetWarned = false;   // o alvo voltou — a próxima ausência avisa
+    return ae.applyWeatherPreset(pe);
 }
 
 } // namespace vv

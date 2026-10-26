@@ -22,6 +22,8 @@
 #include "components/TouchControls.h"
 #include "components/Transform3D.h"
 #include "components/ParticleEmitter.h"   // 0.12-Y-F1: hex das cores
+#include "components/AmbientEnvironment.h"  // 0.12-W-1: o alvo do clima
+#include "core/Presets.h"   // 0.12-W-1: applyWeatherToTarget (o rename liga)
 #include "core/Scene.h"
 #include "platform/InputState.h"
 #include "ui/EditorUi.h"
@@ -2883,6 +2885,24 @@ bool commitTextInput(Scene& scene, EditorState& st) {
             if (Control* ctl = tic->getComponent<Control>()) {
                 ctl->elem.name = tic->name;
             }
+            // 0.12-W-1 — O RENAME LIGA O CLIMA: um TIC renomeado para o
+            // targetEmitter de um AmbientEnvironment ATIVO é ADOTADO no
+            // momento (o fluxo dos DOIS TICs: cria o WeatherController,
+            // cria o ParticleEmitter, renomeia para "RainEmitter" — a chuva
+            // liga sem tocar mais no controlador)
+            {
+                auto& aes = scene.components().ambients();
+                for (u32 a = 0; a < aes.size(); ++a) {
+                    AmbientEnvironment* ae = &aes.at(a);
+                    Tic* at = scene.get(aes.owner(a));
+                    if (at && at->active && ae->active &&
+                        ae->weatherType !=
+                            AmbientEnvironment::kWeatherNone &&
+                        ae->targetEmitter == tic->name) {
+                        applyWeatherToTarget(scene, *at, *ae);
+                    }
+                }
+            }
             return true;
         }
         case 2: {   // texto do elemento
@@ -3083,6 +3103,19 @@ bool commitTextInput(Scene& scene, EditorState& st) {
             pe->endColor[1] = rgba[1];
             pe->endColor[2] = rgba[2];
             pe->clampFields();
+            return true;
+        }
+        case 18: {   // 0.12-W-1: O ALVO DO CLIMA (targetEmitter por NOME)
+            Tic* tic = scene.get(st.textTic);
+            AmbientEnvironment* ae =
+                tic ? tic->getComponent<AmbientEnvironment>() : nullptr;
+            if (!ae) {
+                return false;
+            }
+            ae->targetEmitter = st.textBuf;
+            // o NOVO alvo aplica-se JÁ (o utilizador vê o emissor mudar de
+            // mãos no frame seguinte; sem alvo: o warn de lá, 1×)
+            applyWeatherToTarget(scene, *tic, *ae);
             return true;
         }
         case 6: {   // 0.8.9 — CAMPO NUMÉRICO SEM TETO do Inspector (Transform3D)

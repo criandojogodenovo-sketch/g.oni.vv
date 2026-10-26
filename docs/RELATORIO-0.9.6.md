@@ -1044,3 +1044,29 @@ vermelho) e o release-identity fecha com este §14-z. raster_z2 36/0 ·
 --golden 9/9 EXATO · --sky2 200/0 · --clima 0/0 · --fuzz 150/0 ·
 test_core 0 falhas · c33_virtual 1113/0 · ASan/UBSan 1258/0 · gates
 VERDES · **versionCode 137** — o par declarado aqui e no build config.
+
+### §14-aa — 0.12-W-1 (a arquitetura do céu e do clima: o céu por defeito, o alvo por nome, a janela da grelha, A LUA) — versionCode 138
+
+**G8** (o par declarado no MESMO commit, a regra do §14): a campanha
+0.12-W-1 (o RELATORIO-0.12-W-1-ARCHITECTURE.md): a DECISÃO DE
+ARQUITETURA do dono — o céu procedural EXISTE POR DEFEITO (Params::
+fromEnvironment: sem WorldEnvironment os defaults da casa tod 12.0 /
+cobertura 0.3; com WE o override) · o AmbientEnvironment CONTROLADOR
+com o ALVO POR NOME (targetEmitter, o fluxo dos DOIS TICs:
+"RainEmitter" + "WeatherController") · a grelha na janela GL EXATA da
+W-1 (depth/cull OFF + blend src-alpha durante; tudo reposto depois) ·
+A LUA (disco oposto ao sol, fases pelo terminador, glow subtil) e as
+ESTRELAS com densidade/brilho do utilizador. **O ACHADO GPU (P0)**: o
+FS do céu declarava `highp` só no float — int/uint nascem MEDIUMP no
+fragment shader do ES 3.0 e o HASH INTEIRO das nuvens/estrelas
+colapsava no rasterizador real: NUVENS/ESTRELAS NUNCA DESENHARAM no GPU
+(PROVADO por píxel; os goldens da Z2 tinham baselined um céu morto) —
+a cura `precision highp int;` + os goldens re-baselined ao céu VIVO
+(9/9 EXATO; grid_solo manteve o hash — o isolamento por cena). A
+R-076 + os pins ×10 (test_012w1_arch.cpp) + as provas de píxel do
+raster --w1 (13 checks/0: céu default, estrelas 366→0, lua
+0.998→0.171→0.018, grelha sobre o céu 78866 px, chuva por nome 1856
+px) + as mutações M-W1/M-W2/M-W3 e a MUTAÇÃO DA ORDEM (a grelha antes
+do céu = 8/9 goldens VERMELHOS — a refutação ao vivo). O ACHADO DO
+ROUND-TRIP: o kSunDirDefault não era unitário exato (o edit fantasma
+no .goni) — o default passa a ponto fixo bit-a-bit.

@@ -110,6 +110,7 @@ add_executable(test_core
         test_012y_f2.cpp   # 0.12-Y-F2: os pins do clima e vento (WindTIC/AmbientEnvironment/uWind)
         test_012z2_f3.cpp  # 0.12-Z2 F3: os pins do clima visível (piso px/follow/budget/raio)
         test_012z2_f5.cpp  # 0.12-Z2 F5: os pins da maquinaria das golden images (FNV/parser/veredicto/máscara)
+        test_012w1_arch.cpp  # 0.12-W-1: os pins da arquitetura (céu default/override, alvo do clima por nome, janela GL da grelha, estrelas/lua, transform do PE, compat .goni)
         test_fase_ui.cpp # FASE UI: os pins do redesign (paleta brasa/sobreposição)
         # 0.12-E (E-1): test_012d_sdf/vidro/fogo REFORMADOS — o SDF 3D e o
         # vidro/fogo do shader único foram ABORTADOS pelo dono (o device via

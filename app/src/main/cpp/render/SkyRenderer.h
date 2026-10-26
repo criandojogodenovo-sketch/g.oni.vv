@@ -27,6 +27,7 @@
 #include "core/Types.h"
 #include "math/Math.h"
 #include "render/DrawStats.h"
+#include "components/Environment.h"   // 0.12-W-1: o mapeamento ÚNICO WE→Params
 #include <cmath>
 
 namespace vv {
@@ -181,7 +182,10 @@ inline u32 hash3u(i32 x, i32 y, i32 z) {
 // o campo de ESTRELAS [0,1]: pontos brancos estocásticos — a célula 3D da
 // direção tem uma estrela só acima do THRESHOLD do hash (o céu não vira
 // poeira); o ponto vive num offset 0.2..0.8 da célula (nunca corta)
-inline f32 starField(f32 dx, f32 dy, f32 dz) {
+// 0.12-W-1: o LIMAR deixa de ser constante — nasce do starDensity do
+// WorldEnvironment (starThreshFromDensity abaixo). A sobrecarga de 3 args
+// mantém o campo DE SEMPRE (limiar 184) — os pins da Y-E ficam intactos.
+inline f32 starFieldThresh(f32 dx, f32 dy, f32 dz, f32 thresh) {
     const f32 sx = dx * kStarDensity;
     const f32 sy = dy * kStarDensity;
     const f32 sz = dz * kStarDensity;
@@ -189,7 +193,7 @@ inline f32 starField(f32 dx, f32 dy, f32 dz) {
     const i32 cy = static_cast<i32>(std::floor(sy));
     const i32 cz = static_cast<i32>(std::floor(sz));
     const u32 h = hash3u(cx, cy, cz);
-    if (static_cast<f32>(h & 0xFFu) < kStarThresh) {
+    if (static_cast<f32>(h & 0xFFu) < thresh) {
         return 0.0f;
     }
     const f32 ox = 0.2f + 0.6f * static_cast<f32>((h >> 8u) & 0xFFu) / 255.0f;
@@ -200,6 +204,24 @@ inline f32 starField(f32 dx, f32 dy, f32 dz) {
     const f32 az = sz - static_cast<f32>(cz) - oz;
     const f32 d = std::sqrt(ax * ax + ay * ay + az * az);
     return 1.0f - sstep(0.0f, kStarRadius, d);
+}
+inline f32 starField(f32 dx, f32 dy, f32 dz) {
+    return starFieldThresh(dx, dy, dz, kStarThresh);
+}
+
+// 0.12-W-1 — A DENSIDADE DAS ESTRELAS DO UTILIZADOR: o limiar do campo nasce
+// do starDensity (0..1). A CONTA preserva o olhar da Y-E: density 0.5 = o
+// limiar 184 de SEMPRE (byte a byte — 28,1% das células têm estrela);
+// density 0 = 256 (nenhuma passa — o campo morto); density 1 = 112 (43,7%
+// — denso sem virar poeira). preenchido(d) = 0.5625·d → limiar = 256−144·d.
+inline f32 starThreshFromDensity(f32 density) {
+    if (!(density > 0.0f)) {
+        return 256.0f;   // 0 (ou lixo saneado) = SEM estrelas
+    }
+    if (density > 1.0f) {
+        density = 1.0f;
+    }
+    return 256.0f - 144.0f * density;
 }
 
 // o ÂNGULO do sol pelo relógio: 06h nasce a LESTE (+x, no horizonte), 12h
@@ -217,6 +239,77 @@ inline void sunDirFromTime(f32 tod, f32 out[3]) {
         out[1] /= len;
         out[2] /= len;
     }
+}
+
+// ---- 0.12-W-1: A LUA — o disco, as FASES, o glow (a ordem do dono) --------
+// A lua vive OPSTA ao sol (a posição oposta: lua = −sol — à noite o sol está
+// sob o mundo e a lua nas ALTURAS); o DISCO é branco-amarelado com o glow
+// subtil à volta; a fase controla a iluminação do disco (o terminador).
+constexpr f32 kMoonCosDisk = 0.99945f;  // ~1.9° — um tico menor que o sol
+constexpr f32 kMoonCosSoft = 0.0004f;   // a penumbra da borda do disco
+constexpr f32 kMoonGlowPow = 16.0f;     // o halo (mais largo que o do sol)
+constexpr f32 kMoonGlowGain = 0.18f;    // o ganho (SUBTIL — a ordem do dono)
+constexpr f32 kMoonTermSoft = 0.08f;    // a penumbra do terminador
+constexpr f32 kMoonCol[3] = {0.98f, 0.95f, 0.86f};   // branco-amarelado
+
+// a posição da LUA pelo relógio (oposta ao sol — 22h: sol embaixo, lua alta)
+inline void moonDirFromTime(f32 tod, f32 out[3]) {
+    sunDirFromTime(tod, out);
+    out[0] = -out[0];
+    out[1] = -out[1];
+    out[2] = -out[2];
+}
+
+// o DISCO da lua (a penumbra da casa — o MESMO sstep do sol)
+inline f32 moonDisk(f32 cosA) {
+    return sstep(kMoonCosDisk, kMoonCosDisk + kMoonCosSoft, cosA);
+}
+
+// o HALO da lua (o glow subtil — pow largo, ganho pequeno)
+inline f32 moonGlow(f32 cosA) {
+    const f32 d = cosA > 0.0f ? cosA : 0.0f;
+    return std::pow(d, kMoonGlowPow) * kMoonGlowGain;
+}
+
+// A FASE — a iluminação do disco (u = a coordenada horizontal do ponto no
+// disco, −1..1; o terminador LINEAR: a fração iluminada é exata nas 4
+// fases-chave e o lado que encolhe troca no 0.5):
+//   frac = (1−cos(2π·fase))/2   → 0=nova · 0.5=quarto · 1=cheia
+//   b    = 2·frac−1             → a borda da sombra no eixo do disco
+//   uEff = fase<0.5 ? u : −u    → crescente encolhe dum lado, minguante do outro
+//   lit  = 1−sstep(b−ε, b+ε, uEff)
+inline f32 moonPhaseLit(f32 u, f32 phase) {
+    if (!(phase >= 0.0f)) {
+        phase = 0.0f;   // NaN/−: a lua NOVA (nada iluminado — o seguro)
+    }
+    if (phase > 1.0f) {
+        phase = 1.0f;
+    }
+    const f32 frac = 0.5f * (1.0f - std::cos(phase * 6.28318530718f));
+    const f32 b = 2.0f * frac - 1.0f;
+    const f32 uEff = phase < 0.5f ? u : -u;
+    return 1.0f - sstep(b - kMoonTermSoft, b + kMoonTermSoft, uEff);
+}
+
+// o u DO DISCO: a coordenada horizontal do ponto no disco (−1..1 dentro do
+// disco; o tangent t = cross(lua, up) — o eixo horizontal do céu). Fora do
+// disco o valor extrapola (o chamador só o lê com cosA > kMoonCosDisk).
+inline f32 moonDiscU(f32 dx, f32 dy, f32 dz, const f32 moonDir[3]) {
+    // t = normalize(cross(m, +Y)) — a lua nunca está no polo (|m.y| < 0.97)
+    f32 tx = moonDir[2];
+    f32 ty = 0.0f;
+    f32 tz = -moonDir[0];
+    const f32 tl = std::sqrt(tx * tx + tz * tz);
+    if (tl > 1e-6f) {
+        tx /= tl;
+        tz /= tl;
+    } else {
+        tx = 1.0f;   // o polo degenerado: o eixo x (nunca acontece com o arco)
+        tz = 0.0f;
+    }
+    (void)ty;
+    const f32 sinDisk = std::sqrt(1.0f - kMoonCosDisk * kMoonCosDisk);
+    return (dx * tx + dz * tz) / sinDisk;
 }
 
 // a GRADE do dia/noite — os 4 estados chave (a ordem do dono) interpolados
@@ -364,6 +457,33 @@ inline void viewDir(f32 ndcX, f32 ndcY, const Vec3& right, const Vec3& up,
                    ndcY * tanF * up.z};
 }
 
+// 0.12-W-1 — A INVERSA (para as PROVAS de píxel): a direção NORMALIZADA →
+// o NDC onde ela cai. A MATEMÁTICA: viewDir constrói v = fwd + a·right +
+// b·up (a = ndc.x·aspect·tanF, b = ndc.y·tanF) e o raster NORMALIZA dir =
+// v/|v| — o dot(dir, fwd) = 1/|v| (base ortonormal) é a divisão perspética:
+// (dir−fwd)·right = a/|v| → dividir por dot(dir,fwd) recupera a exato.
+// Direções fora do frustum EXTRAPOLAM; atrás da câmara devolve os neutros
+// (a sonda da lua do raster vive AQUI).
+inline void dirToNdc(const Vec3& dir, const Vec3& right, const Vec3& up,
+                     const Vec3& fwd, f32 aspect, f32 tanF, f32 outNdc[2]) {
+    const f32 w = dir.x * fwd.x + dir.y * fwd.y + dir.z * fwd.z;
+    if (w <= 1e-6f || aspect <= 1e-6f || tanF <= 1e-6f) {
+        outNdc[0] = 0.0f;
+        outNdc[1] = 0.0f;
+        return;
+    }
+    const Vec3 d{dir.x - fwd.x, dir.y - fwd.y, dir.z - fwd.z};
+    const f32 rx = (d.x * right.x + d.y * right.y + d.z * right.z) / w;
+    const f32 ux = (d.x * up.x + d.y * up.y + d.z * up.z) / w;
+    outNdc[0] = rx / (aspect * tanF);
+    outNdc[1] = ux / tanF;
+}
+
+// ---- 0.12-W-1: OS DEFAULTS SEM WorldEnvironment (a decisão do dono — o céu
+// procedural EXISTE por defeito; o WE é um OVERRIDE opcional) ---------------
+constexpr f32 kNoEnvTod      = 12.0f;   // o meio-dia (a identidade da Y-E)
+constexpr f32 kNoEnvCoverage = 0.3f;    // o valor do prompt do dono (W-1)
+
 } // namespace sky
 
 // ---- o PROGRAMA GL (o irmão do Grid: quad 4 vértices + shader) -------------
@@ -388,6 +508,65 @@ public:
         f32  thunder = 0.0f;          // 0.12-Y-F2: o FLASH da trovoada
                                       // (0..1 — o AmbientEnvironment STORM;
                                       // 0 = o céu de sempre byte a byte)
+        // ---- 0.12-W-1: as estrelas do utilizador + a LUA -----------------
+        f32  starThresh = 184.0f;     // o limiar do campo (184 = a Y-E;
+                                      // nasce do starDensity via
+                                      // sky::starThreshFromDensity)
+        f32  starBright = 0.8f;       // o ganho dos pontos (0..1)
+        f32  moonDir[3] = {0.0f, -1.0f, 0.0f};  // oposta ao sol (o nadir
+                                                // de fábrica = invisível)
+        f32  moonPhase = 0.5f;        // 0=nova · 0.5=cheia · 1=nova
+        f32  moonBright = 0.6f;       // 0 = sem lua (o branch morre)
+
+        // 0.12-W-1 — A DECISÃO DE ARQUITETURA DO DONO (a FONTE ÚNICA do
+        // mapeamento WorldEnvironment→Params — o main E os pins partilham):
+        //   • env == nullptr → OS DEFAULTS DA CASA (o céu procedural EXISTE
+        //     por defeito): timeOfDay 12.0, cloudCoverage 0.3 (kNoEnv*), as
+        //     cores da identidade da Y-E, estrelas/lua nos defaults do dono;
+        //   • env != nullptr → O OVERRIDE pelas propriedades do WE.
+        // A CÂMARA (right/up/fwd/aspect/tanHalfFovY) fica a cargo do
+        // chamador (é do frame, não do WE). As cores chegam JÁ graduadas
+        // pela dayNightGrade (o contrato da Y-E: a grade corre no CPU 1×
+        // por frame; aqui só entram os escalares + sol/lua/estrelas).
+        void fromEnvironment(const Environment* env,
+                             const sky::SkyGrade& grade,
+                             f32 thunderNow, f32 skyTime) {
+            time = skyTime;
+            thunder = thunderNow;
+            for (int i = 0; i < 3; ++i) {
+                horizon[i] = grade.hor[i];
+                zenith[i] = grade.zen[i];
+                sunCol[i] = grade.sun[i];
+            }
+            if (env != nullptr) {
+                // O OVERRIDE: o WE manda em TUDO (a cobertura dele, o
+                // relógio dele, as estrelas/lua dele)
+                coverage   = env->cloudCoverage;
+                speed      = env->cloudSpeed;
+                height     = env->cloudHeight;
+                stars      = grade.stars;
+                starThresh = sky::starThreshFromDensity(env->starDensity);
+                starBright = env->starBrightness;
+                sky::moonDirFromTime(env->timeOfDay, moonDir);
+                sky::sunDirFromTime(env->timeOfDay, sunDir);
+                moonPhase  = env->moonPhase;
+                moonBright = env->moonBrightness;
+            } else {
+                // OS DEFAULTS SEM WorldEnvironment (o céu de fábrica — o
+                // meio-dia da identidade Y-E + a cobertura do dono W-1)
+                coverage   = sky::kNoEnvCoverage;
+                speed      = Environment::kSpeedDefault;
+                height     = Environment::kHeightDefault;
+                stars      = grade.stars;   // a grade do tod default (12) → 0
+                starThresh = sky::starThreshFromDensity(
+                    Environment::kStarDensityDefault);
+                starBright = Environment::kStarBrightDefault;
+                sky::sunDirFromTime(sky::kNoEnvTod, sunDir);
+                sky::moonDirFromTime(sky::kNoEnvTod, moonDir);
+                moonPhase  = Environment::kMoonPhaseDefault;
+                moonBright = Environment::kMoonBrightDefault;
+            }
+        }
     };
 
     bool init();      // compila/linka o programa + o quad (o padrão Grid)
@@ -422,6 +601,11 @@ private:
     i32 locThunder_ = -1;  // 0.12-Y-F2: o flash da trovoada (entra ANTES do
                            // uTime — o ÚLTIMO 1f do draw continua a ser o
                            // relógio das nuvens, o contrato do pin da D)
+    i32 locStarThresh_ = -1;  // 0.12-W-1: o limiar do campo (antes do uTime)
+    i32 locStarBright_ = -1;  // 0.12-W-1: o ganho dos pontos (antes do uTime)
+    i32 locMoonPhase_ = -1;   // 0.12-W-1: a fase da lua (antes do uTime)
+    i32 locMoonBright_ = -1;  // 0.12-W-1: o brilho da lua (antes do uTime)
+    i32 locMoonDir_ = -1;     // 0.12-W-1: a direção da lua (3f)
     i32 locHor_ = -1;
     i32 locZen_ = -1;
     i32 locSunCol_ = -1;
